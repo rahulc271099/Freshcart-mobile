@@ -2,6 +2,15 @@
 
     <uses-permission android:name="android.permission.INTERNET" />
 
+    <!-- Location/address foundation (react-native-maps + geolocation) -->
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+
+    <!-- Required at runtime on Android 13+ (API 33+) before any Notifee
+         notification will actually display; requested at runtime by the
+         notifications feature, not granted automatically by declaring it. -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+
     <application
       android:name=".MainApplication"
       android:label="@string/app_name"
@@ -11,6 +20,16 @@
       android:theme="@style/AppTheme"
       android:usesCleartextTraffic="${usesCleartextTraffic}"
       android:supportsRtl="true">
+
+      <!-- react-native-maps (Google Maps on Android): value is injected from
+           android/local.properties (gitignored) via the manifestPlaceholders
+           block in android/app/build.gradle — see MAPS_API_KEY there.
+           Empty until a real key is added; the map view will simply not
+           render tiles until then, it will not crash the build. -->
+      <meta-data
+        android:name="com.google.android.geo.API_KEY"
+        android:value="${MAPS_API_KEY}" />
+
       <activity
         android:name=".MainActivity"
         android:label="@string/app_name"

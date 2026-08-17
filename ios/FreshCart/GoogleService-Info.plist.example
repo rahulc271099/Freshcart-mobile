@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  PLACEHOLDER — not a real Firebase config file.
+
+  Replace with the real GoogleService-Info.plist downloaded from the
+  Firebase console (Project settings > Your apps > iOS app), then:
+  1. Rename it to GoogleService-Info.plist (drop the .example suffix).
+  2. Add it to the Xcode project (drag into the FreshCart group, ensure
+     "Copy items if needed" and the FreshCart target are checked) — this
+     step can't be scripted outside Xcode.
+  3. In Xcode, enable the "Push Notifications" and "Background Modes"
+     (Remote notifications) capabilities on the FreshCart target.
+-->
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>API_KEY</key>
+	<string>PENDING</string>
+	<key>GCM_SENDER_ID</key>
+	<string>PENDING</string>
+	<key>PROJECT_ID</key>
+	<string>PENDING</string>
+	<key>BUNDLE_ID</key>
+	<string>com.freshcart.app</string>
+	<key>IS_ADS_ENABLED</key>
+	<false/>
+	<key>IS_ANALYTICS_ENABLED</key>
+	<false/>
+	<key>IS_APPINVITE_ENABLED</key>
+	<false/>
+	<key>IS_GCM_ENABLED</key>
+	<true/>
+	<key>IS_SIGNIN_ENABLED</key>
+	<false/>
+	<key>GOOGLE_APP_ID</key>
+	<string>PENDING</string>
+</dict>
+</plist>

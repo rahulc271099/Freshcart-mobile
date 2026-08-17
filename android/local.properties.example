@@ -1,0 +1,10 @@
+# PLACEHOLDER — copy this file to android/local.properties (already
+# gitignored, never commit real keys) and fill in real values.
+#
+# sdk.dir is normally written here automatically by Android Studio/Gradle;
+# no need to set it manually unless your setup requires it.
+
+# Google Maps SDK for Android key (Android only — iOS defaults to Apple
+# Maps, which needs no key). Restrict this key to this app's package name
+# (com.freshcart.app) + release/debug SHA-1 in the Google Cloud console.
+MAPS_API_KEY=

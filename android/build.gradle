@@ -15,6 +15,13 @@ buildscript {
         classpath("com.android.tools.build:gradle")
         classpath("com.facebook.react:react-native-gradle-plugin")
         classpath("org.jetbrains.kotlin:kotlin-gradle-plugin")
+
+        // PENDING — Firebase (@react-native-firebase/app + messaging):
+        // uncomment once a real android/app/google-services.json replaces
+        // android/app/google-services.json.example. Applying this plugin
+        // without a real google-services.json makes the Gradle build fail
+        // outright, so it stays commented out until then.
+        // classpath("com.google.gms:google-services:4.4.2")
     }
 }
 

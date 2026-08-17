@@ -1,0 +1,20 @@
+{
+  "_comment": "PLACEHOLDER — not a real Firebase config file. Replace this entire file with the real google-services.json downloaded from the Firebase console (Project settings > Your apps > Android app), then rename it to google-services.json (without the .example suffix) in this same folder. Also uncomment the two google-services plugin lines in android/build.gradle and android/app/build.gradle.",
+  "project_info": {
+    "project_number": "PENDING",
+    "project_id": "PENDING",
+    "storage_bucket": "PENDING"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "PENDING",
+        "android_client_info": {
+          "package_name": "com.freshcart.app"
+        }
+      },
+      "api_key": [{ "current_key": "PENDING" }]
+    }
+  ],
+  "configuration_version": "1"
+}
