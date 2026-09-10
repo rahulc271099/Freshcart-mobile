@@ -40,6 +40,19 @@ local.properties
 node_modules/
 npm-debug.log
 yarn-error.log
+*.log
+
+# Environment variables — real values must never be committed (see the
+# tracked `.env.example` template). `.env` itself already says "gitignored"
+# in its own header comment, but wasn't actually listed here — fixing that.
+.env
+.env.local
+.env.*.local
+
+# Editor
+.vscode/
+*.tsbuildinfo
+.eslintcache
 
 # fastlane
 #

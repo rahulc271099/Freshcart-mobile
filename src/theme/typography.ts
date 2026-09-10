@@ -1,25 +1,46 @@
-import { Platform } from 'react-native';
 import type { TextStyle } from 'react-native';
+import { fonts } from './fonts';
 
 /**
- * Centralized type scale. Uses the OS default system font on purpose (no
- * custom font family decided yet) — swap `fontFamily` here once one is
- * chosen, rather than in every component.
+ * Centralized type scale using the custom Inter font family.
+ * Each token's `fontFamily` selects the correct weight-specific Inter asset directly - `fontWeight` is deliberately not set here (or anywhere else in the app): mixing it with a custom, weight-specific font family is what silently broke custom fonts before (see fonts.ts / react-native.config.js).
  */
-const fontFamily = Platform.select({ ios: 'System', android: 'Roboto', default: 'System' });
-
-function textStyle(overrides: TextStyle): TextStyle {
-  return { fontFamily, ...overrides };
-}
-
 export const typography = {
-  heading1: textStyle({ fontSize: 28, fontWeight: '700', lineHeight: 34 }),
-  heading2: textStyle({ fontSize: 22, fontWeight: '700', lineHeight: 28 }),
-  heading3: textStyle({ fontSize: 18, fontWeight: '600', lineHeight: 24 }),
-  body: textStyle({ fontSize: 15, fontWeight: '400', lineHeight: 22 }),
-  bodyStrong: textStyle({ fontSize: 15, fontWeight: '600', lineHeight: 22 }),
-  caption: textStyle({ fontSize: 12, fontWeight: '400', lineHeight: 16 }),
-  button: textStyle({ fontSize: 15, fontWeight: '600', lineHeight: 20 }),
+  heading1: {
+    fontFamily: fonts.bold,
+    fontSize: 28,
+    lineHeight: 34,
+  } as TextStyle,
+  heading2: {
+    fontFamily: fonts.bold,
+    fontSize: 22,
+    lineHeight: 28,
+  } as TextStyle,
+  heading3: {
+    fontFamily: fonts.semiBold,
+    fontSize: 18,
+    lineHeight: 24,
+  } as TextStyle,
+  body: {
+    fontFamily: fonts.regular,
+    fontSize: 15,
+    lineHeight: 22,
+  } as TextStyle,
+  bodyStrong: {
+    fontFamily: fonts.semiBold,
+    fontSize: 15,
+    lineHeight: 22,
+  } as TextStyle,
+  caption: {
+    fontFamily: fonts.regular,
+    fontSize: 12,
+    lineHeight: 16,
+  } as TextStyle,
+  button: {
+    fontFamily: fonts.semiBold,
+    fontSize: 15,
+    lineHeight: 20,
+  } as TextStyle,
 } as const;
 
 export type TypographyToken = keyof typeof typography;

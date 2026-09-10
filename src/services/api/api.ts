@@ -9,7 +9,7 @@ import {
 
 /**
  * The single configured Axios instance for the whole app. Feature API
- * modules (`features/*/api/*Api.ts`) call methods on this instance
+ * modules (`features/<feature>/api/*Api.ts`) call methods on this instance
  * directly (`api.get(...)`, `api.post(...)`, ...) instead of going through
  * a hand-rolled method-switch wrapper — Axios already provides typed,
  * well-tested GET/POST/PUT/DELETE/PATCH methods, so there's nothing for a
@@ -20,12 +20,12 @@ export const api = axios.create({
   withCredentials: true,
 });
 
-api.interceptors.request.use(requestInterceptor, (error) =>
+api.interceptors.request.use(requestInterceptor, error =>
   Promise.reject(error),
 );
 
 api.interceptors.response.use(
-  (response) => response,
+  response => response,
   createResponseErrorInterceptor(api),
 );
 

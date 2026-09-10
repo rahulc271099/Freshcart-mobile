@@ -66,3 +66,36 @@ export const clearTokens = (): void => {
   appStorage.remove(ACCESS_TOKEN_KEY);
   appStorage.remove(REFRESH_TOKEN_KEY);
 };
+
+const THEME_PREFERENCE_KEY = 'theme.preference';
+
+export type ThemePreference = 'light' | 'dark' | 'system';
+
+/**
+ * Same rationale as `getTokens` above: `ThemeProvider` needs a synchronous
+ * read on mount (no loading-state flicker between "assume light" and
+ * "actually dark"), so this goes straight through MMKV rather than
+ * Zustand's `persist` (which rehydrates asynchronously).
+ */
+export const getThemePreference = (): ThemePreference => {
+  const stored = appStorage.getString(THEME_PREFERENCE_KEY);
+  if (stored === 'light' || stored === 'dark') {
+    return stored;
+  }
+  // TODO(theme): temporarily default to 'light' instead of 'system' per
+  // explicit product decision - the app shouldn't follow the OS appearance
+  // for now. Dark mode infrastructure (`darkColors`, `ThemeProvider`,
+  // `setScheme`, the 'system' branch below) is intentionally left intact
+  // so this is a one-line revert once dark mode is ready to ship.
+  return 'light';
+};
+
+export const saveThemePreference = (preference: ThemePreference): void => {
+  if (preference === 'system') {
+    // No stored value = "follow the OS setting", so a system preference is
+    // represented by absence rather than the literal string.
+    appStorage.remove(THEME_PREFERENCE_KEY);
+  } else {
+    appStorage.set(THEME_PREFERENCE_KEY, preference);
+  }
+};
