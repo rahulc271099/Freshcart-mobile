@@ -7,7 +7,6 @@ import { Button } from '@/components';
 import {
   fonts,
   radius,
-  shadows,
   spacing,
   useTheme,
   type ThemeColors,
@@ -85,7 +84,6 @@ function createStyles(colors: ThemeColors) {
       borderTopColor: colors.divider,
       paddingHorizontal: spacing.md,
       paddingTop: spacing.sm,
-      ...shadows.md,
     },
     stepper: {
       flexDirection: 'row',

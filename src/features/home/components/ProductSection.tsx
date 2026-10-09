@@ -1,6 +1,7 @@
 import React, { useMemo } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 
+import { ProductCard, type Product, type ProductVariant } from '@/components';
 import {
   fonts,
   spacing,
@@ -8,18 +9,30 @@ import {
   useTheme,
   type ThemeColors,
 } from '@/theme';
-import { ProductCard, type Product } from './ProductCard';
+
+// The shared `ProductCard` (see `@/components/ProductCard.tsx`) is
+// width-agnostic (`flex: 1`) so it also works inside Categories'/Search's
+// 2-column grids - this section is what pins it to a fixed width for its
+// own horizontal scrolling list, same role `CARD_WIDTH` played on the old
+// Home-only card.
+const CARD_WIDTH = 152;
 
 interface ProductSectionProps {
   title: string;
+  subtitle?: string | null;
   products: Product[];
   onViewAll?: () => void;
-  onAddToCart?: (product: Product) => void;
+  onAddToCart?: (
+    product: Product,
+    variant: ProductVariant,
+    quantity: number,
+  ) => void;
   onProductPress?: (product: Product) => void;
 }
 
 export function ProductSection({
   title,
+  subtitle,
   products,
   onViewAll,
   onAddToCart,
@@ -32,10 +45,26 @@ export function ProductSection({
     <View style={styles.container}>
       {/* Header */}
       <View style={styles.header}>
-        <Text style={styles.title}>{title}</Text>
-        <Pressable onPress={onViewAll} hitSlop={8}>
-          <Text style={styles.viewAll}>View all ›</Text>
-        </Pressable>
+        <View style={styles.titleGroup}>
+          <Text style={styles.title} numberOfLines={1}>
+            {title}
+          </Text>
+          {subtitle ? (
+            <Text style={styles.subtitle} numberOfLines={1}>
+              {subtitle}
+            </Text>
+          ) : null}
+        </View>
+        {onViewAll ? (
+          <Pressable
+            onPress={onViewAll}
+            hitSlop={8}
+            accessibilityRole="button"
+            accessibilityLabel={`See all ${title}`}
+          >
+            <Text style={styles.viewAll}>See all ›</Text>
+          </Pressable>
+        ) : null}
       </View>
 
       {/* Horizontal product list */}
@@ -45,12 +74,13 @@ export function ProductSection({
         contentContainerStyle={styles.list}
       >
         {products.map(p => (
-          <ProductCard
-            key={p.id}
-            product={p}
-            onAddToCart={onAddToCart}
-            onPress={onProductPress}
-          />
+          <View key={p.id} style={styles.cardWrap}>
+            <ProductCard
+              product={p}
+              onAddToCart={onAddToCart}
+              onPress={onProductPress}
+            />
+          </View>
         ))}
       </ScrollView>
     </View>
@@ -69,9 +99,18 @@ function createStyles(colors: ThemeColors) {
       paddingHorizontal: spacing.md,
       marginBottom: spacing.sm,
     },
+    titleGroup: {
+      flex: 1,
+      marginRight: spacing.sm,
+    },
     title: {
       ...typography.heading3,
       color: colors.textPrimary,
+    },
+    subtitle: {
+      ...typography.caption,
+      color: colors.textSecondary,
+      marginTop: 2,
     },
     viewAll: {
       fontSize: 13,
@@ -82,6 +121,10 @@ function createStyles(colors: ThemeColors) {
       paddingHorizontal: spacing.md,
       paddingBottom: spacing.sm,
       paddingTop: spacing.xs,
+    },
+    cardWrap: {
+      width: CARD_WIDTH,
+      marginRight: spacing.sm,
     },
   });
 }

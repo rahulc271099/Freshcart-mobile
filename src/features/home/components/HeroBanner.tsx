@@ -1,183 +1,285 @@
-import React, {
-  useCallback,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-} from 'react';
+import React, { memo, useCallback, useEffect, useMemo, useRef } from 'react';
 import {
-  Dimensions,
-  Image,
+  FlatList,
   Pressable,
-  ScrollView,
   StyleSheet,
-  Text,
   View,
-  type NativeScrollEvent,
-  type NativeSyntheticEvent,
+  useWindowDimensions,
 } from 'react-native';
+import { useIsFocused } from '@react-navigation/native';
+import Animated, {
+  Extrapolation,
+  interpolate,
+  interpolateColor,
+  useAnimatedScrollHandler,
+  useAnimatedStyle,
+  useSharedValue,
+  type SharedValue,
+} from 'react-native-reanimated';
 
-import {
-  fonts,
-  radius,
-  shadows,
-  spacing,
-  useTheme,
-  type ThemeColors,
-} from '@/theme';
+import { AppImage, Skeleton } from '@/components';
+import { radius, spacing, useTheme, type ThemeColors } from '@/theme';
+import type { HomeBanner } from '../types/home.types';
 
-interface BannerSlide {
-  id: string;
-  pill: string;
-  title: string;
-  subtitle: string;
-  discountLine1: string;
-  discountLine2: string;
-  discountLine3: string;
-  imageUri: string;
-}
+// ─────────────────────────────────────────────────────────────
+// Layout / motion constants
+// ─────────────────────────────────────────────────────────────
 
-const SLIDES: BannerSlide[] = [
-  {
-    id: 'farm-fresh',
-    pill: "TODAY'S PICK",
-    title: 'Farm Fresh\nGoodness',
-    subtitle: 'Handpicked fruits &\nvegetables at best prices',
-    discountLine1: 'UP TO',
-    discountLine2: '30%',
-    discountLine3: 'OFF',
-    imageUri:
-      'https://images.unsplash.com/photo-1543168256-418811576931?w=800&q=80',
-  },
-  {
-    id: 'weekly-deal',
-    pill: 'WEEKLY DEAL',
-    title: 'Fresh &\nAffordable',
-    subtitle: 'Everyday essentials at\neveryday low prices',
-    discountLine1: 'UP TO',
-    discountLine2: '25%',
-    discountLine3: 'OFF',
-    imageUri:
-      'https://images.unsplash.com/photo-1610832958506-aa56368176cf?w=800&q=80',
-  },
-  {
-    id: 'fruit-fest',
-    pill: 'LIMITED TIME',
-    title: 'Juicy Fruit\nFest',
-    subtitle: 'Seasonal fruits at\nunbeatable prices',
-    discountLine1: 'UP TO',
-    discountLine2: '40%',
-    discountLine3: 'OFF',
-    imageUri:
-      'https://images.unsplash.com/photo-1519996529931-28324d5a630e?w=800&q=80',
-  },
-];
+/** Time each banner stays put before auto-advancing. */
+const AUTOPLAY_MS = 4500;
+/** Centre card's width as a share of the screen - the rest is the two
+ * neighbouring cards peeking in from the edges (matches the reference
+ * banner design). */
+const CARD_WIDTH_RATIO = 0.78;
+const CARD_GAP = spacing.sm;
+/** Width / height of the reference banner artwork (864 x 558). */
+const CARD_ASPECT_RATIO = 864 / 558;
+/** Scale of the cards either side of the centred one - interpolated
+ * continuously from the scroll offset, so a swipe and an auto-advance
+ * produce the exact same grow/shrink motion. */
+const INACTIVE_SCALE = 0.88;
+/** The list renders the banners this many times back-to-back and always
+ * keeps the viewport inside the MIDDLE copy (see `normalizeIndex`), which
+ * is what makes the carousel cyclic: past the last banner comes the first
+ * one again, in either direction. */
+const COPIES = 3;
+const DOT_SIZE = 8;
 
-/** How often the carousel auto-advances. */
-const AUTOPLAY_MS = 5000;
-const SLIDE_WIDTH = Dimensions.get('window').width;
+type Slide = { banner: HomeBanner; key: string };
 
 interface HeroBannerProps {
-  onShopNow?: (slide: BannerSlide) => void;
+  banners: HomeBanner[] | undefined;
+  isLoading: boolean;
+  /** Tapped a banner whose `redirect_type` isn't `NONE`. */
+  onBannerPress?: (banner: HomeBanner) => void;
 }
 
 /**
- * Promotional banner carousel - same card structure/content as the original
- * single static banner (pill, title, subtitle, one CTA, product image,
- * pagination dots), now with 3 slides that auto-rotate and support manual
- * swipe. Paging is done with a plain `ScrollView` (`pagingEnabled`, full
- * screen-width pages with the card inset via padding rather than margin,
- * so `pagingEnabled`'s page-width math stays exact) rather than a 3rd-party
- * carousel dependency.
+ * Home's top banner carousel, fed by `GET /api/customer/home/banners/`.
+ *
+ * - Cyclic: last -> first (and first -> last when swiping back) with no
+ *   visible jump.
+ * - Auto-advances every `AUTOPLAY_MS`; pauses while the shopper is
+ *   dragging (and while Home isn't the focused tab), then resumes from
+ *   wherever they stopped.
+ * - Swipes and auto-advances use the same native snap scroll and the same
+ *   scroll-offset-driven card scale / pagination-dot fade, so both feel
+ *   identical.
+ *
+ * Loading shows a card-shaped skeleton; no banners (empty or failed
+ * fetch) renders nothing - a blank "no banners" box would just be noise
+ * on Home, and pull-to-refresh retries.
  */
-export function HeroBanner({ onShopNow }: HeroBannerProps) {
+export function HeroBanner({
+  banners,
+  isLoading,
+  onBannerPress,
+}: HeroBannerProps) {
+  if (isLoading) return <HeroBannerSkeleton />;
+  if (!banners || banners.length === 0) return null;
+
+  // Re-key on the banner set so a refreshed/changed list re-initialises
+  // the scroll position instead of leaving it pointing past the end.
+  const signature = banners.map(b => b.id).join(',');
+  return (
+    <BannerCarousel
+      key={signature}
+      banners={banners}
+      onBannerPress={onBannerPress}
+    />
+  );
+}
+
+// ─────────────────────────────────────────────────────────────
+// Carousel
+// ─────────────────────────────────────────────────────────────
+
+interface BannerCarouselProps {
+  banners: HomeBanner[];
+  onBannerPress?: (banner: HomeBanner) => void;
+}
+
+function BannerCarousel({ banners, onBannerPress }: BannerCarouselProps) {
   const { colors } = useTheme();
   const styles = useMemo(() => createStyles(colors), [colors]);
-  const scrollRef = useRef<ScrollView>(null);
-  const [activeIndex, setActiveIndex] = useState(0);
+  const { width: screenWidth } = useWindowDimensions();
+  const isFocused = useIsFocused();
 
-  // Re-armed every time `activeIndex` changes (manual swipe included), so a
-  // manual swipe doesn't fight with an auto-advance landing moments later.
-  useEffect(() => {
-    const timer = setTimeout(() => {
-      const nextIndex = (activeIndex + 1) % SLIDES.length;
-      scrollRef.current?.scrollTo({
-        x: nextIndex * SLIDE_WIDTH,
-        animated: true,
-      });
-      setActiveIndex(nextIndex);
-    }, AUTOPLAY_MS);
-    return () => clearTimeout(timer);
-  }, [activeIndex]);
+  const count = banners.length;
+  const isCyclic = count > 1;
 
-  const handleMomentumScrollEnd = useCallback(
-    (event: NativeSyntheticEvent<NativeScrollEvent>) => {
-      const index = Math.round(event.nativeEvent.contentOffset.x / SLIDE_WIDTH);
-      setActiveIndex(index);
-    },
-    [],
+  const cardWidth = Math.round(screenWidth * CARD_WIDTH_RATIO);
+  const stride = cardWidth + CARD_GAP;
+  // Pads the list so the first card sits centred in the viewport.
+  const sidePadding = (screenWidth - stride) / 2;
+
+  const slides = useMemo<Slide[]>(
+    () =>
+      Array.from({ length: isCyclic ? COPIES : 1 }, (_, copy) =>
+        banners.map(banner => ({ banner, key: `${banner.id}-${copy}` })),
+      ).flat(),
+    [banners, isCyclic],
   );
+
+  /** Maps any index in the repeated list to the same banner inside the
+   * middle copy. */
+  const normalizeIndex = useCallback(
+    (index: number) => count + (((index % count) + count) % count),
+    [count],
+  );
+  const startIndex = isCyclic ? count : 0;
+
+  const listRef = useRef<FlatList<Slide>>(null);
+  const scrollX = useSharedValue(startIndex * stride);
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const scrollToIndex = useCallback(
+    (index: number, animated: boolean) => {
+      listRef.current?.scrollToOffset({ offset: index * stride, animated });
+    },
+    [stride],
+  );
+
+  // ── Autoplay ───────────────────────────────────────────────
+  const clearTimer = useCallback(() => {
+    if (timerRef.current) {
+      clearTimeout(timerRef.current);
+      timerRef.current = null;
+    }
+  }, []);
+
+  const scheduleNext = useCallback(() => {
+    clearTimer();
+    timerRef.current = setTimeout(() => {
+      // Where the viewport really is right now (works whether the last
+      // move was an auto-advance or a manual swipe).
+      const current = Math.round(scrollX.value / stride);
+      const base = normalizeIndex(current);
+      if (base !== current) {
+        // Invisible re-centre: the middle copy shows the identical banner
+        // at the identical on-screen position.
+        scrollToIndex(base, false);
+      }
+      // One frame for that jump to land, then the visible, animated slide.
+      requestAnimationFrame(() => {
+        scrollToIndex(base + 1, true);
+      });
+      scheduleNext();
+    }, AUTOPLAY_MS);
+  }, [clearTimer, normalizeIndex, scrollToIndex, scrollX, stride]);
+
+  useEffect(() => {
+    if (!isCyclic || !isFocused) return undefined;
+    scheduleNext();
+    return clearTimer;
+  }, [isCyclic, isFocused, scheduleNext, clearTimer]);
+
+  // ── Scroll handling ────────────────────────────────────────
+  // Re-centres into the middle copy after a swipe settles so a long run of
+  // swipes in one direction can never reach the end of the repeated list.
+  const handleSettled = useCallback(
+    (offsetX: number) => {
+      if (!isCyclic) return;
+      const index = Math.round(offsetX / stride);
+      const base = normalizeIndex(index);
+      if (base !== index) scrollToIndex(base, false);
+      if (isFocused) scheduleNext();
+    },
+    [isCyclic, isFocused, normalizeIndex, scheduleNext, scrollToIndex, stride],
+  );
+
+  const handleDragStart = useCallback(() => {
+    clearTimer();
+  }, [clearTimer]);
+
+  const handleDragEnd = useCallback(() => {
+    if (isCyclic && isFocused) scheduleNext();
+  }, [isCyclic, isFocused, scheduleNext]);
+
+  const scrollHandler = useAnimatedScrollHandler({
+    onScroll: event => {
+      scrollX.value = event.contentOffset.x;
+    },
+  });
+
+  const getItemLayout = useCallback(
+    (_: ArrayLike<Slide> | null | undefined, index: number) => ({
+      length: stride,
+      offset: stride * index,
+      index,
+    }),
+    [stride],
+  );
+
+  const renderItem = useCallback(
+    ({ item, index }: { item: Slide; index: number }) => (
+      <BannerSlideView
+        banner={item.banner}
+        index={index}
+        stride={stride}
+        cardWidth={cardWidth}
+        scrollX={scrollX}
+        onPress={onBannerPress}
+      />
+    ),
+    [stride, cardWidth, scrollX, onBannerPress],
+  );
+
+  // A single banner has nothing to scroll to or cycle through.
+  if (!isCyclic) {
+    return (
+      <View style={styles.staticWrap}>
+        <BannerSlideView
+          banner={banners[0]}
+          index={0}
+          stride={stride}
+          cardWidth={cardWidth}
+          scrollX={scrollX}
+          onPress={onBannerPress}
+        />
+      </View>
+    );
+  }
 
   return (
     <View>
-      <ScrollView
-        ref={scrollRef}
+      <Animated.FlatList
+        ref={listRef}
+        data={slides}
+        keyExtractor={slide => slide.key}
+        renderItem={renderItem}
         horizontal
-        pagingEnabled
         showsHorizontalScrollIndicator={false}
-        onMomentumScrollEnd={handleMomentumScrollEnd}
-      >
-        {SLIDES.map(slide => (
-          <View key={slide.id} style={styles.page}>
-            <View style={styles.card}>
-              {/* ── Left content ──────────────────────────────── */}
-              <View style={styles.left}>
-                <View style={styles.todayPill}>
-                  <Text style={styles.todayText}>{slide.pill}</Text>
-                </View>
+        // One banner per swipe, snapping exactly onto a card.
+        snapToInterval={stride}
+        snapToAlignment="start"
+        decelerationRate="fast"
+        disableIntervalMomentum
+        initialScrollIndex={startIndex}
+        getItemLayout={getItemLayout}
+        contentContainerStyle={{ paddingHorizontal: sidePadding }}
+        onScroll={scrollHandler}
+        scrollEventThrottle={16}
+        onScrollBeginDrag={handleDragStart}
+        onScrollEndDrag={handleDragEnd}
+        onMomentumScrollEnd={event =>
+          handleSettled(event.nativeEvent.contentOffset.x)
+        }
+        initialNumToRender={5}
+        windowSize={5}
+        removeClippedSubviews={false}
+      />
 
-                <Text style={styles.title}>{slide.title}</Text>
-                <Text style={styles.subtitle}>{slide.subtitle}</Text>
-
-                <Pressable
-                  style={styles.shopBtn}
-                  onPress={() => onShopNow?.(slide)}
-                >
-                  <Text style={styles.shopBtnText}>Shop Now →</Text>
-                </Pressable>
-              </View>
-
-              {/* ── Right image + discount circle ─────────────── */}
-              <View style={styles.right}>
-                <View style={styles.discountCircle}>
-                  <Text style={styles.discountLine1}>
-                    {slide.discountLine1}
-                  </Text>
-                  <Text style={styles.discountLine2}>
-                    {slide.discountLine2}
-                  </Text>
-                  <Text style={styles.discountLine3}>
-                    {slide.discountLine3}
-                  </Text>
-                </View>
-
-                <Image
-                  source={{ uri: slide.imageUri }}
-                  style={styles.image}
-                  resizeMode="cover"
-                />
-              </View>
-            </View>
-          </View>
-        ))}
-      </ScrollView>
-
-      {/* ── Pagination dots ────────────────────────────── */}
-      <View style={styles.dotsRow}>
-        {SLIDES.map((slide, index) => (
-          <View
-            key={slide.id}
-            style={[styles.dot, index === activeIndex && styles.dotActive]}
+      <View style={styles.dotsRow} accessibilityElementsHidden>
+        {banners.map((banner, i) => (
+          <PaginationDot
+            key={banner.id}
+            index={i}
+            count={count}
+            stride={stride}
+            scrollX={scrollX}
+            inactiveColor={colors.border}
+            activeColor={colors.primary}
           />
         ))}
       </View>
@@ -185,100 +287,166 @@ export function HeroBanner({ onShopNow }: HeroBannerProps) {
   );
 }
 
+// ─────────────────────────────────────────────────────────────
+// One banner card
+// ─────────────────────────────────────────────────────────────
+
+interface BannerSlideViewProps {
+  banner: HomeBanner;
+  index: number;
+  stride: number;
+  cardWidth: number;
+  scrollX: SharedValue<number>;
+  onPress?: (banner: HomeBanner) => void;
+}
+
+const BannerSlideView = memo(function BannerSlideCard({
+  banner,
+  index,
+  stride,
+  cardWidth,
+  scrollX,
+  onPress,
+}: BannerSlideViewProps) {
+  const { colors } = useTheme();
+  const styles = useMemo(() => createStyles(colors), [colors]);
+
+  // Grows to full size as it nears the centre, shrinks as it leaves -
+  // computed from the live scroll offset on the UI thread, so it tracks a
+  // finger drag and a programmatic slide frame-for-frame.
+  const animatedStyle = useAnimatedStyle(() => {
+    const centre = index * stride;
+    const scale = interpolate(
+      scrollX.value,
+      [centre - stride, centre, centre + stride],
+      [INACTIVE_SCALE, 1, INACTIVE_SCALE],
+      Extrapolation.CLAMP,
+    );
+    return { transform: [{ scale }] };
+  });
+
+  const tappable = banner.redirect_type !== 'NONE' && onPress != null;
+
+  return (
+    <Animated.View style={[styles.slide, { width: stride }, animatedStyle]}>
+      <Pressable
+        style={[styles.card, { width: cardWidth }]}
+        disabled={!tappable}
+        onPress={() => onPress?.(banner)}
+        accessibilityRole={tappable ? 'button' : 'image'}
+        accessibilityLabel={banner.title}
+      >
+        <AppImage
+          source={{ uri: banner.image_url }}
+          style={styles.image}
+          resizeMode="cover"
+        />
+      </Pressable>
+    </Animated.View>
+  );
+});
+
+// ─────────────────────────────────────────────────────────────
+// Pagination dot
+// ─────────────────────────────────────────────────────────────
+
+interface PaginationDotProps {
+  index: number;
+  count: number;
+  stride: number;
+  scrollX: SharedValue<number>;
+  inactiveColor: string;
+  activeColor: string;
+}
+
+function PaginationDot({
+  index,
+  count,
+  stride,
+  scrollX,
+  inactiveColor,
+  activeColor,
+}: PaginationDotProps) {
+  const animatedStyle = useAnimatedStyle(() => {
+    // Position within the repeated list -> position within one pass of the
+    // banners, then the shortest (wrap-around) distance to this dot, so the
+    // highlight hands over smoothly from the last dot to the first.
+    const position = scrollX.value / stride;
+    const within = ((position % count) + count) % count;
+    const rawDistance = Math.abs(within - index);
+    const distance = Math.min(rawDistance, count - rawDistance);
+    const progress = Math.max(0, 1 - distance);
+    return {
+      backgroundColor: interpolateColor(
+        progress,
+        [0, 1],
+        [inactiveColor, activeColor],
+      ),
+    };
+  });
+
+  return (
+    <Animated.View
+      style={[
+        {
+          width: DOT_SIZE,
+          height: DOT_SIZE,
+          borderRadius: DOT_SIZE / 2,
+        },
+        animatedStyle,
+      ]}
+    />
+  );
+}
+
+// ─────────────────────────────────────────────────────────────
+// Loading skeleton
+// ─────────────────────────────────────────────────────────────
+
+/** Card-shaped placeholder with the same dimensions as a real banner, so
+ * the swap to content doesn't shift anything below it. */
+export function HeroBannerSkeleton() {
+  const { colors } = useTheme();
+  const styles = useMemo(() => createStyles(colors), [colors]);
+  const { width: screenWidth } = useWindowDimensions();
+  const cardWidth = Math.round(screenWidth * CARD_WIDTH_RATIO);
+
+  return (
+    <View>
+      <View style={styles.staticWrap}>
+        <View style={styles.slide}>
+          <Skeleton
+            width={cardWidth}
+            height={Math.round(cardWidth / CARD_ASPECT_RATIO)}
+            borderRadius={radius.lg}
+          />
+        </View>
+      </View>
+      <View style={styles.dotsRow}>
+        <Skeleton
+          width={DOT_SIZE * 3}
+          height={DOT_SIZE}
+          borderRadius={DOT_SIZE / 2}
+        />
+      </View>
+    </View>
+  );
+}
+
 function createStyles(colors: ThemeColors) {
   return StyleSheet.create({
-    page: {
-      width: SLIDE_WIDTH,
-      paddingHorizontal: spacing.md,
-      paddingVertical: spacing.sm,
+    staticWrap: {
+      alignItems: 'center',
+    },
+    slide: {
+      alignItems: 'center',
+      paddingVertical: spacing.xs,
     },
     card: {
-      backgroundColor: colors.backgroundSec,
+      aspectRatio: CARD_ASPECT_RATIO,
       borderRadius: radius.lg,
-      height: 195,
-      flexDirection: 'row',
       overflow: 'hidden',
-      ...shadows.sm,
-    },
-    left: {
-      flex: 1,
-      paddingLeft: spacing.md,
-      paddingTop: spacing.md,
-      paddingBottom: spacing.lg,
-      justifyContent: 'flex-start',
-    },
-    todayPill: {
-      alignSelf: 'flex-start',
-      backgroundColor: colors.background,
-      borderRadius: radius.full,
-      paddingHorizontal: spacing.sm,
-      paddingVertical: 4,
-      marginBottom: spacing.sm,
-    },
-    todayText: {
-      fontSize: 9,
-      fontFamily: fonts.bold,
-      color: colors.textSecondary,
-      letterSpacing: 0.5,
-    },
-    title: {
-      fontSize: 22,
-      fontFamily: fonts.bold,
-      color: colors.textPrimary,
-      lineHeight: 27,
-    },
-    subtitle: {
-      fontSize: 11,
-      color: colors.textSecondary,
-      lineHeight: 16,
-      marginTop: spacing.xs,
-    },
-    shopBtn: {
-      marginTop: spacing.sm,
-      alignSelf: 'flex-start',
-      backgroundColor: colors.primary,
-      borderRadius: radius.full,
-      paddingHorizontal: spacing.md,
-      paddingVertical: spacing.xs + 2,
-    },
-    shopBtnText: {
-      color: '#fff',
-      fontSize: 12,
-      fontFamily: fonts.semiBold,
-    },
-    right: {
-      width: 165,
-      position: 'relative',
-    },
-    discountCircle: {
-      position: 'absolute',
-      top: spacing.sm,
-      right: spacing.sm,
-      zIndex: 2,
-      width: 56,
-      height: 56,
-      borderRadius: 28,
-      backgroundColor: colors.primary,
-      alignItems: 'center',
-      justifyContent: 'center',
-    },
-    discountLine1: {
-      color: '#fff',
-      fontSize: 8,
-      fontFamily: fonts.medium,
-      lineHeight: 11,
-    },
-    discountLine2: {
-      color: '#fff',
-      fontSize: 17,
-      fontFamily: fonts.bold,
-      lineHeight: 19,
-    },
-    discountLine3: {
-      color: '#fff',
-      fontSize: 9,
-      fontFamily: fonts.semiBold,
-      lineHeight: 12,
+      backgroundColor: colors.surface,
     },
     image: {
       width: '100%',
@@ -287,19 +455,11 @@ function createStyles(colors: ThemeColors) {
     dotsRow: {
       flexDirection: 'row',
       justifyContent: 'center',
-      gap: spacing.xs,
-      // marginTop: spacing.sm,
-    },
-    dot: {
-      width: 6,
-      height: 6,
-      borderRadius: 3,
-      backgroundColor: colors.border,
-    },
-    dotActive: {
-      width: 18,
-      borderRadius: 3,
-      backgroundColor: colors.primary,
+      alignItems: 'center',
+      flexWrap: 'wrap',
+      gap: spacing.sm - 2,
+      paddingHorizontal: spacing.md,
+      marginTop: spacing.xs,
     },
   });
 }

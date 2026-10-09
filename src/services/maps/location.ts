@@ -29,12 +29,36 @@ export async function requestLocationPermission(): Promise<boolean> {
   return true;
 }
 
-export function getCurrentPosition(): Promise<GeolocationResponse> {
+function readPosition(
+  options: Parameters<typeof Geolocation.getCurrentPosition>[2],
+): Promise<GeolocationResponse> {
   return new Promise((resolve, reject) => {
-    Geolocation.getCurrentPosition(resolve, reject, {
-      enableHighAccuracy: true,
-      timeout: 15000,
-      maximumAge: 10000,
-    });
+    Geolocation.getCurrentPosition(resolve, reject, options);
   });
+}
+
+/**
+ * Two-stage read. A cold GPS fix indoors (or on an emulator with no
+ * location set) routinely takes longer than any sane timeout, which is
+ * what produced "finding your location took too long". So: try a precise
+ * GPS fix briefly first, then fall back to the network/cell/wifi
+ * position (or a recent cached one), which resolves in a second or two
+ * and is plenty accurate for the delivery-area check.
+ */
+export async function getCurrentPosition(): Promise<GeolocationResponse> {
+  try {
+    return await readPosition({
+      enableHighAccuracy: true,
+      timeout: 8000,
+      maximumAge: 30000,
+    });
+  } catch (error) {
+    // Permission denied won't be fixed by a retry - surface it as-is.
+    if ((error as { code?: number } | null)?.code === 1) throw error;
+    return readPosition({
+      enableHighAccuracy: false,
+      timeout: 15000,
+      maximumAge: 10 * 60 * 1000,
+    });
+  }
 }

@@ -20,6 +20,8 @@ export interface HeaderProps {
   title?: string;
   subtitle?: string;
   onBackPress?: () => void;
+  /** Overrides the back glyph colour (e.g. on a photo, where theme text may not contrast). */
+  backIconColor?: string;
   rightAccessory?: ReactNode;
   style?: StyleProp<ViewStyle>;
   testID?: string;
@@ -34,6 +36,7 @@ export function Header({
   title,
   subtitle,
   onBackPress,
+  backIconColor,
   rightAccessory,
   style,
   testID,
@@ -52,7 +55,14 @@ export function Header({
             accessibilityLabel="Go back"
             style={styles.backButton}
           >
-            <Text style={styles.backIcon}>{'‹'}</Text>
+            <Text
+              style={[
+                styles.backIcon,
+                backIconColor ? { color: backIconColor } : null,
+              ]}
+            >
+              {'‹'}
+            </Text>
           </Pressable>
         ) : null}
       </View>

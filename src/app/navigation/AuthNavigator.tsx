@@ -1,4 +1,5 @@
 import React from 'react';
+import { useReducedMotion } from 'react-native-reanimated';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 
 import { LoginScreen } from '@/features/auth/screens/LoginScreen';
@@ -15,11 +16,27 @@ const Stack = createNativeStackNavigator<AuthStackParamList>();
  * auth screens use the app's own `Header` component instead.
  */
 export function AuthNavigator() {
+  const reducedMotion = useReducedMotion();
   return (
-    <Stack.Navigator screenOptions={{ headerShown: false }}>
-      <Stack.Screen name="Onboarding" component={Onboarding1}/>
-      <Stack.Screen name="Login" component={LoginScreen} />
-      <Stack.Screen name="OTPVerification" component={OTPVerificationScreen}/>
+    <Stack.Navigator
+      screenOptions={{
+        headerShown: false,
+        ...(reducedMotion ? { animation: 'fade' as const } : {}),
+      }}
+    >
+      <Stack.Screen name="Onboarding" component={Onboarding1} />
+      {/* Onboarding, Login and OTP share one photograph - a crossfade keeps it
+          visually continuous instead of sliding a second copy across. */}
+      <Stack.Screen
+        name="Login"
+        component={LoginScreen}
+        options={{ animation: 'fade' }}
+      />
+      <Stack.Screen
+        name="OTPVerification"
+        component={OTPVerificationScreen}
+        options={{ animation: 'fade' }}
+      />
     </Stack.Navigator>
   );
 }

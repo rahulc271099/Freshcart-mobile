@@ -31,12 +31,12 @@ export type AuthStackParamList = {
  * Authenticated flow. `Tabs` hosts the bottom tab navigator (`AppTabs`).
  * Modeled as its own stack — rather than mounting `AppTabs` directly at the
  * root of the authenticated flow — specifically so screens outside the tab
- * bar can be pushed here later as sibling routes that cover the tab bar,
- * e.g.:
+ * bar can be pushed here as sibling routes that cover the tab bar, e.g.:
  *   Home (tab)  → ProductDetails
  *   Cart (tab)  → Checkout → Payment → OrderSuccess
- * Those screens are intentionally not added yet — this task only prepares
- * the structure for them.
+ * `Checkout`/`Payment` read the selected address/cart straight from
+ * `useCheckoutStore`/`useCartStore` rather than route params - see
+ * `features/checkout/screens/ConfirmLocationScreen.tsx`'s own comment.
  */
 export type MainStackParamList = {
   Tabs: NavigatorScreenParams<AppTabsParamList>;
@@ -45,12 +45,44 @@ export type MainStackParamList = {
   Profile: undefined;
   EditProfile: undefined;
   Addresses: undefined;
+  // Delivery-area picker (pincode search) - see features/location.
+  SelectLocation: undefined;
+  // First-run gate (no saved area yet): the same picker with no back
+  // button. Deliberately a DIFFERENT route name from `SelectLocation` -
+  // see `LocationGateNavigator` for why.
+  LocationGate: { required?: boolean } | undefined;
   // `addressId` present = editing that address; absent = adding a new one.
-  AddEditAddress: { addressId?: string } | undefined;
+  // Real backend PK (`AddressSerializer.address_id`) is an integer.
+  AddEditAddress:
+    | {
+        addressId?: number;
+        selectedCoordinates?: { latitude: number; longitude: number };
+      }
+    | undefined;
+  AddressLocation: {
+    initialCoordinates?: { latitude: number; longitude: number };
+    addressId?: number;
+  };
   // Looked up against `features/home/data/products.ts`'s `ALL_PRODUCTS`
   // catalog by id - see ProductDetailsScreen's own comment for why a
   // plain id (not the full Product object) is passed through the route.
   ProductDetails: { productId: string };
+  // "Confirm Location" step of checkout - see `features/checkout/screens/
+  // ConfirmLocationScreen.tsx`.
+  Checkout: undefined;
+  // Final checkout step - see `features/checkout/screens/PaymentScreen.tsx`.
+  Payment: undefined;
+  // Confirmation after a placed order - reached via `navigation.reset`.
+  OrderSuccess: {
+    orderId: number;
+    orderNumber: string;
+    totalAmount: number;
+    etaMinutes?: number | null;
+  };
+  // Order history - see `features/orders`.
+  Orders: undefined;
+  // "See all" for one Home campaign - see `features/home`.
+  CampaignProducts: { campaignId: number; title: string };
 };
 
 /**
@@ -58,7 +90,8 @@ export type MainStackParamList = {
  */
 export type AppTabsParamList = {
   Home: undefined;
-  Categories: undefined;
+  // `groupId` preselects that group in the sidebar (Home's group strip).
+  Categories: { groupId?: number } | undefined;
   Cart: undefined;
 };
 

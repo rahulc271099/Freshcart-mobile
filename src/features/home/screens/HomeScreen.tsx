@@ -1,5 +1,5 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { RefreshControl, StyleSheet, View } from 'react-native';
+import React, { useCallback, useMemo, useState } from 'react';
+import { Linking, RefreshControl, StyleSheet, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import {
   useNavigation,
@@ -25,38 +25,34 @@ import type {
   MainStackParamList,
 } from '@/app/navigation/navigationTypes';
 import { spacing, useTheme, type ThemeColors } from '@/theme';
-import { BuyAgainSection } from '../components/BuyAgainSection';
-import { CategoryRow } from '../components/CategoryRow';
+import { CategoryRow, type CategoryRowItem } from '../components/CategoryRow';
+import { useQueryClient } from '@tanstack/react-query';
+import { QUERY_KEYS } from '@/constants/reactQueryKeys';
+import { useGroups } from '@/features/categories/hooks/useGroups';
+import { useSelectedDeliveryArea } from '@/features/location/hooks/useDeliveryLocation';
 import { DeliveryHeader } from '../components/DeliveryHeader';
 import { HeroBanner } from '../components/HeroBanner';
 import { HomeSearchBar } from '../components/HomeSearchBar';
-import { ProductSection } from '../components/ProductSection';
+import { CampaignSections } from '../components/CampaignSections';
+import { HomeSectionError } from '../components/HomeSectionError';
 import { ProductSectionSkeleton } from '../components/ProductCardSkeleton';
-import { RecommendedSection } from '../components/RecommendedSection';
 import { WhyFreshCartSection } from '../components/WhyFreshCartSection';
-import {
-  BUY_AGAIN_EXAMPLE,
-  FRUITS,
-  OFFERS,
-  RECOMMENDED_EXAMPLE,
-  VEGETABLES,
-} from '../data/products';
-import type { Product } from '../components/ProductCard';
+import { useAddProductToCart } from '../hooks/useAddProductToCart';
+import { useHomeBanners, useHomeCampaigns } from '../hooks/useHomeContent';
+import type { HomeBanner, HomeCampaign } from '../types/home.types';
+import type { Product } from '@/components';
 
 /** Scroll delta (px) needed to trigger a hide/show, so tiny jitters don't. */
 const SCROLL_THRESHOLD = 10;
 /** Show/hide transition duration - matches AppTabs.tsx's own tab-switch reset. */
 const VISIBILITY_DURATION = 220;
-/** How long the initial skeleton loading state shows before swapping to the
- * real (dummy-data) content - simulates a first fetch. */
-const INITIAL_LOAD_MS = 700;
-/** Simulated pull-to-refresh duration. */
-const REFRESH_MS = 900;
-
 type HomeNavigationProp = CompositeNavigationProp<
   BottomTabNavigationProp<AppTabsParamList, 'Home'>,
   NativeStackNavigationProp<MainStackParamList>
 >;
+
+/** How many groups Home shows before the "More" tile. */
+const HOME_GROUP_LIMIT = 4;
 
 // ─── Screen ───────────────────────────────────────────────────────────────────
 
@@ -69,6 +65,38 @@ export function HomeScreen() {
   // can clear it instead of sitting underneath it.
   const tabBarHeight = useBottomTabBarHeight();
   const navigation = useNavigation<HomeNavigationProp>();
+
+  // Real home content (see features/home/api/homeApi.ts) - four
+  // independent queries so one slow/failed section never blocks the rest.
+  const banners = useHomeBanners();
+  // Home's strip shows the catalogue groups (same data as the Categories
+  // sidebar) rather than the admin-featured categories endpoint.
+  const categories = useGroups();
+  const groupTiles = useMemo<CategoryRowItem[]>(
+    () =>
+      (categories.data ?? []).slice(0, HOME_GROUP_LIMIT).map(group => ({
+        id: group.group_id,
+        label: group.display_name || group.name,
+        imageUrl: group.image_url,
+      })),
+    [categories.data],
+  );
+  // Campaign sections (GET /customer/campaigns?placement=HOME_SECTION) -
+  // each campaign then loads its own products, see `CampaignSections`.
+  const campaigns = useHomeCampaigns();
+  console.log("🚀 ~ HomeScreen ~ campaigns:", campaigns)
+
+  // ── Delivery location ─────────────────────────────────────────────────
+  // `MainNavigator` never renders Home until an area is saved (see its
+  // location gate), so this is only the header label; tapping it re-opens
+  // the picker to change area.
+  const selectedArea = useSelectedDeliveryArea();
+  let deliveryAddressLabel = 'Select delivery location';
+  if (selectedArea.data) {
+    deliveryAddressLabel = `${selectedArea.data.name}, ${selectedArea.data.pincode}`;
+  } else if (selectedArea.isLoading) {
+    deliveryAddressLabel = 'Locating…';
+  }
 
   // Drives the shared tab-bar visibility value from this screen's scroll
   // position - see TabBarVisibilityContext.tsx for why this needs a Context
@@ -146,13 +174,10 @@ export function HomeScreen() {
     [headerHeight],
   );
 
-  // `ProductCard` now reads/writes the cart store directly (see its own
-  // comment) - this is only a side-effect hook (e.g. analytics) passed down
-  // as `onAddToCart`, NOT a second place that mutates the cart. It used to
-  // also call `addItem` here, which double-counted every tap (quantity
-  // jumped by 2, not 1) - don't reintroduce that.
-  const handleAddToCart = useCallback((_product: Product) => {}, []);
+  const handleAddToCart = useAddProductToCart();
 
+  // Real catalogue products (campaign sections) - ids are real
+  // product ids, so ProductDetails can load them.
   const handleProductPress = useCallback(
     (product: Product) => {
       navigation.navigate('ProductDetails', { productId: product.id });
@@ -160,21 +185,82 @@ export function HomeScreen() {
     [navigation],
   );
 
-  // ── Simulated initial load (skeleton -> real content) ─────────────────
-  const [isLoading, setIsLoading] = useState(true);
-  useEffect(() => {
-    const timer = setTimeout(() => setIsLoading(false), INITIAL_LOAD_MS);
-    return () => clearTimeout(timer);
-  }, []);
+  // Where a banner tap goes, by the backend's own `redirect_type`.
+  // OFFER has no destination screen in the app yet, so it's a no-op for now.
+  const handleBannerPress = useCallback(
+    (banner: HomeBanner) => {
+      switch (banner.redirect_type) {
+        case 'PRODUCT':
+        case 'COMBO':
+          if (banner.redirect_id != null) {
+            navigation.navigate('ProductDetails', {
+              productId: String(banner.redirect_id),
+            });
+          }
+          break;
+        case 'CAMPAIGN':
+          if (banner.redirect_id != null) {
+            navigation.navigate('CampaignProducts', {
+              campaignId: banner.redirect_id,
+              title: banner.title,
+            });
+          }
+          break;
+        case 'CATEGORY':
+          navigation.navigate('Categories');
+          break;
+        case 'URL':
+          // Only ever hand http(s) links to the OS - this string is
+          // admin-entered content, not something to trust blindly.
+          if (
+            banner.redirect_url &&
+            /^https?:\/\//i.test(banner.redirect_url)
+          ) {
+            Linking.openURL(banner.redirect_url).catch(error => {
+              console.warn('[HomeScreen] could not open banner URL', error);
+            });
+          }
+          break;
+        default:
+          break;
+      }
+    },
+    [navigation],
+  );
 
-  // ── Pull-to-refresh: native indicator only, no card/image stretching -
-  // RefreshControl's own spinner is what appears; nothing about the
-  // content's layout/scale changes during or after it. ─────────────────
+  const handleSeeAll = useCallback(
+    (campaign: HomeCampaign) => {
+      navigation.navigate('CampaignProducts', {
+        campaignId: campaign.id,
+        title: campaign.campaign_name,
+      });
+    },
+    [navigation],
+  );
+
+  // ── Pull-to-refresh: re-fetches all four home queries for real. Native
+  // indicator only, no card/image stretching - RefreshControl's own
+  // spinner is what appears; nothing about the content's layout/scale
+  // changes during or after it. ─────────────────────────────────────────
+  const { refetch: refetchBanners } = banners;
+  const { refetch: refetchCategories } = categories;
+  const queryClient = useQueryClient();
   const [refreshing, setRefreshing] = useState(false);
-  const handleRefresh = useCallback(() => {
+  const handleRefresh = useCallback(async () => {
     setRefreshing(true);
-    setTimeout(() => setRefreshing(false), REFRESH_MS);
-  }, []);
+    try {
+      await Promise.all([
+        refetchBanners(),
+        refetchCategories(),
+        // The campaign list and every campaign's products (shared prefix).
+        queryClient.invalidateQueries({
+          queryKey: QUERY_KEYS.HOME.campaigns(),
+        }),
+      ]);
+    } finally {
+      setRefreshing(false);
+    }
+  }, [queryClient, refetchBanners, refetchCategories]);
 
   return (
     // The outer plain View owns the TRUE page background (`colors.background`)
@@ -196,7 +282,8 @@ export function HomeScreen() {
           onLayout={handleHeaderLayout}
         >
           <DeliveryHeader
-            onAddressPress={() => navigation.navigate('Addresses')}
+            address={deliveryAddressLabel}
+            onAddressPress={() => navigation.navigate('SelectLocation')}
             onProfilePress={() => navigation.navigate('Profile')}
           />
         </Animated.View>
@@ -208,7 +295,14 @@ export function HomeScreen() {
         <View style={styles.stickyGroup}>
           <HomeSearchBar onPress={() => navigation.navigate('Search')} />
           <CategoryRow
-            onCategoryPress={() => navigation.navigate('Categories')}
+            items={groupTiles}
+            isLoading={categories.isLoading}
+            // A tile opens Categories with that group preselected; "More"
+            // opens it on its default (first) group.
+            onItemPress={groupId =>
+              navigation.navigate('Categories', { groupId })
+            }
+            onMorePress={() => navigation.navigate('Categories')}
           />
         </View>
       </SafeAreaView>
@@ -232,72 +326,34 @@ export function HomeScreen() {
         ]}
       >
         <Animated.View entering={FadeInDown.duration(250)}>
-          <HeroBanner onShopNow={() => {}} />
-        </Animated.View>
-
-        <Animated.View entering={FadeInDown.duration(250)}>
-          {isLoading ? (
-            <ProductSectionSkeleton />
-          ) : (
-            <ProductSection
-              title="Today's Offers"
-              products={OFFERS}
-              onViewAll={() => {}}
-              onAddToCart={handleAddToCart}
-              onProductPress={handleProductPress}
-            />
-          )}
-        </Animated.View>
-
-        <Animated.View entering={FadeInDown.duration(250)}>
-          {isLoading ? (
-            <ProductSectionSkeleton />
-          ) : (
-            <ProductSection
-              title="Fresh Vegetables"
-              products={VEGETABLES}
-              onViewAll={() => {}}
-              onAddToCart={handleAddToCart}
-              onProductPress={handleProductPress}
-            />
-          )}
-        </Animated.View>
-
-        <Animated.View entering={FadeInDown.duration(250)}>
-          {isLoading ? (
-            <ProductSectionSkeleton />
-          ) : (
-            <ProductSection
-              title="Fresh Fruits"
-              products={FRUITS}
-              onViewAll={() => {}}
-              onAddToCart={handleAddToCart}
-              onProductPress={handleProductPress}
-            />
-          )}
-        </Animated.View>
-
-        {/* Both sections below use DEMO data (BUY_AGAIN_EXAMPLE /
-            RECOMMENDED_EXAMPLE from data/products.ts) so they're visible
-            as an example - see the loud comments on those two exports and
-            on BuyAgainSection/RecommendedSection themselves for what needs
-            to change before this is real (real order history / real
-            behavioral signals, or `[]` to hide them for new users). */}
-        <Animated.View entering={FadeInDown.duration(250)}>
-          <BuyAgainSection
-            products={BUY_AGAIN_EXAMPLE}
-            onAddToCart={handleAddToCart}
-            onProductPress={handleProductPress}
+          <HeroBanner
+            banners={banners.data}
+            isLoading={banners.isLoading}
+            onBannerPress={handleBannerPress}
           />
         </Animated.View>
 
-        <Animated.View entering={FadeInDown.duration(250)}>
-          <RecommendedSection
-            products={RECOMMENDED_EXAMPLE}
-            onAddToCart={handleAddToCart}
-            onProductPress={handleProductPress}
+        {/* Campaigns - GET /api/customer/campaigns?placement=HOME_SECTION,
+            in the server's display order. While the list loads one skeleton
+            stands in for the sections to come; each campaign then loads
+            (and fails) on its own. */}
+        {campaigns.isLoading ? (
+          <ProductSectionSkeleton />
+        ) : campaigns.isError && !campaigns.data ? (
+          <HomeSectionError
+            title="Featured"
+            onRetry={() => campaigns.refetch()}
           />
-        </Animated.View>
+        ) : (
+          <Animated.View entering={FadeInDown.duration(250)}>
+            <CampaignSections
+              campaigns={campaigns.data}
+              onSeeAll={handleSeeAll}
+              onAddToCart={handleAddToCart}
+              onProductPress={handleProductPress}
+            />
+          </Animated.View>
+        )}
 
         <Animated.View entering={FadeInDown.duration(250)}>
           <WhyFreshCartSection />

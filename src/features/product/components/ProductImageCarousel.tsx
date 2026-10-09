@@ -1,7 +1,6 @@
 import React, { useCallback, useMemo, useState } from 'react';
 import {
   FlatList,
-  Image,
   Pressable,
   StyleSheet,
   View,
@@ -10,9 +9,9 @@ import {
   type NativeScrollEvent,
 } from 'react-native';
 
-import { OfferBadge } from '@/components';
+import { AppImage, OfferBadge } from '@/components';
 import { icons } from '@/constants/icons';
-import { radius, shadows, spacing, useTheme, type ThemeColors } from '@/theme';
+import { radius, spacing, useTheme, type ThemeColors } from '@/theme';
 
 interface ProductImageCarouselProps {
   images: string[];
@@ -61,7 +60,7 @@ export function ProductImageCarousel({
         onScroll={handleScroll}
         scrollEventThrottle={16}
         renderItem={({ item }) => (
-          <Image
+          <AppImage
             source={{ uri: item }}
             style={[styles.image, { width }]}
             resizeMode="contain"
@@ -143,7 +142,6 @@ function createStyles(colors: ThemeColors) {
       backgroundColor: colors.background,
       alignItems: 'center',
       justifyContent: 'center',
-      ...shadows.sm,
     },
     dots: {
       flexDirection: 'row',

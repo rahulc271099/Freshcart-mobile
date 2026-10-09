@@ -1,4 +1,4 @@
-import React, { useCallback, useMemo, useState } from 'react';
+import React, { useCallback, useMemo } from 'react';
 import {
   Alert,
   Pressable,
@@ -17,9 +17,14 @@ import {
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { Search } from 'lucide-react-native';
 
-import { Header } from '@/components';
-import { ProductSection } from '@/features/home/components/ProductSection';
-import { ALL_PRODUCTS } from '@/features/home/data/products';
+import {
+  ErrorView,
+  Header,
+  Loader,
+  ProductOptionsSheet,
+  type Product,
+  type ProductVariant,
+} from '@/components';
 import { icons } from '@/constants/icons';
 import type { MainStackParamList } from '@/app/navigation/navigationTypes';
 import { useCartItems } from '@/features/cart/hooks/useCartItems';
@@ -33,9 +38,20 @@ import {
   useTheme,
   type ThemeColors,
 } from '@/theme';
-import { getProductDetails } from '../data/productDetails';
+import {
+  mapCustomerProductCardToProduct,
+  mapCustomerVariantsToProduct,
+} from '@/features/categories/utils/mapCatalogueData';
+import { useCustomerProducts } from '@/features/categories/hooks/useCustomerProducts';
+// `ProductSection` is Home's horizontal-scroll product row - reused as-is
+// for "Similar Products" rather than building a second copy of it; it's a
+// generic, data-free presentational component (same spirit as this
+// screen already importing the shared `ProductCard` itself via
+// `@/components`), not anything Home-specific.
+import { ProductSection } from '@/features/home/components/ProductSection';
+import { resolveOptionsMode } from '../api/productApi';
+import { useProductVariants } from '../hooks/useProductVariants';
 import { ProductImageCarousel } from '../components/ProductImageCarousel';
-import { ProductOptionsSheet } from '../components/ProductOptionsSheet';
 import { ProductStickyFooter } from '../components/ProductStickyFooter';
 import { ProductTrustBadges } from '../components/ProductTrustBadges';
 
@@ -51,33 +67,88 @@ type ProductDetailsRouteProp = RouteProp<MainStackParamList, 'ProductDetails'>;
  * this keeps the paginated-carousel UI honest about that until then. */
 const GALLERY_IMAGE_COUNT = 3;
 
+// Live-catalogue products only now - the old dummy/`ALL_PRODUCTS` path
+// (Home's hand-picked string ids like `'grapes'`) has been removed
+// per request, along with its own Home entry point. `productId` is
+// expected to be a real numeric catalogue id (see
+// `mapCustomerProductCardToProduct`'s `id: String(card.productId)`);
+// anything else falls into the same "not found" state a deleted/bad id
+// would, rather than crashing on `Number(productId)` being `NaN`.
+function isValidProductId(productId: string): boolean {
+  return /^\d+$/.test(productId);
+}
+
 export function ProductDetailsScreen() {
   const { colors } = useTheme();
   const styles = useMemo(() => createStyles(colors), [colors]);
   const navigation = useNavigation<ProductDetailsNavigationProp>();
   const route = useRoute<ProductDetailsRouteProp>();
   const { productId } = route.params;
+  const validId = isValidProductId(productId);
 
-  const product = useMemo(
-    () => ALL_PRODUCTS.find(p => p.id === productId),
-    [productId],
-  );
-  const details = useMemo(
-    () => (product ? getProductDetails(product) : null),
-    [product],
-  );
+  // The variants endpoint (`GET .../variants/`) instead of a dedicated
+  // single-product detail endpoint - the backend doesn't have one, and
+  // this returns every field the page needs anyway (name/image/pricing
+  // flags/groupId) plus `defaultVariant`, whose `finalSellingPrice` is
+  // already the real, post-discount price - see
+  // `mapCustomerVariantsToProduct`'s own comment.
+  const liveVariantsQuery = useProductVariants(Number(productId), validId);
+
+  const product = useMemo(() => {
+    const data = liveVariantsQuery.data;
+    if (!data) return undefined;
+    return mapCustomerVariantsToProduct(data);
+  }, [liveVariantsQuery.data]);
+  console.log("🚀 ~ ProductDetailsScreen ~ liveProduct:", product)
+
+  // A real pack-size variant vs a custom-quantity (loose/bulk) product -
+  // decides which cart-store action this screen's simple quick-add uses,
+  // same routing rule `ProductCard` uses for its own options sheet.
+  const liveOptionsMode = liveVariantsQuery.data
+    ? resolveOptionsMode({
+        isCustomQty: liveVariantsQuery.data.isCustomQty,
+        isVariableWeight: liveVariantsQuery.data.isVariableWeight,
+        pricingMethod: liveVariantsQuery.data.pricingMethod,
+      })
+    : null;
+  const defaultVariant = liveVariantsQuery.data?.defaultVariant;
+
+  // "Similar products" - every other active product in this product's own
+  // group (see `CustomerProductVariants.groupId`), via the same
+  // per-group endpoint/hook Categories already uses. Filtered to exclude
+  // this product itself and mapped through the same listing-card mapper
+  // Categories/Search/Home all share.
+  const groupId = liveVariantsQuery.data?.groupId ?? null;
+  const similarProductsQuery = useCustomerProducts(groupId);
+  const similarProducts = useMemo(() => {
+    const results = similarProductsQuery.data?.results ?? [];
+    return results
+      .filter(card => String(card.productId) !== productId)
+      .map(mapCustomerProductCardToProduct);
+  }, [similarProductsQuery.data, productId]);
+
+  // A VARIANT-based product can have MULTIPLE simultaneous cart lines
+  // (e.g. both "500 g" and "1 kg" of the same product), so "the quantity
+  // of this product" isn't one number the way it is for a custom-quantity
+  // one - this screen's simple +/- stepper only ever quick-adds/adjusts
+  // the DEFAULT variant's own line, so the line id it reads/writes has to
+  // match that variant specifically, not just the bare product id.
+  const cartLineId =
+    liveOptionsMode === 'variants' && defaultVariant != null
+      ? `${productId}:${defaultVariant.variantId}`
+      : productId;
 
   const { itemCount } = useCartItems();
-  const addItem = useCartStore(state => state.addItem);
+  const addVariantLine = useCartStore(state => state.addVariantLine);
+  const setCustomQuantityLine = useCartStore(
+    state => state.setCustomQuantityLine,
+  );
   const updateQuantity = useCartStore(state => state.updateQuantity);
   const quantity = useCartStore(
-    state => state.items.find(i => i.productId === productId)?.quantity ?? 0,
+    state => state.items.find(i => i.id === cartLineId)?.quantity ?? 0,
   );
   const isWishlisted = useWishlistStore(state => state.isWishlisted(productId));
   const toggleWishlist = useWishlistStore(state => state.toggle);
-
-  const [descExpanded, setDescExpanded] = useState(false);
-  const [sheetVisible, setSheetVisible] = useState(false);
 
   const handleShare = useCallback(() => {
     if (!product) return;
@@ -86,21 +157,73 @@ export function ProductDetailsScreen() {
     }).catch(() => {});
   }, [product]);
 
+  // Quick-adds ONE unit of the default pick, branching the same way
+  // `ProductCard`'s own options sheet routes a cart write: a real
+  // pack-size variant is `addVariantLine` (its own line, keyed by
+  // `cartLineId` above); a custom-quantity product is `setCustomQuantityLine`
+  // (one line for the whole product). This is deliberately just the
+  // DEFAULT pick, not the full options picker - a shopper who wants a
+  // different pack size/quantity still gets that from the "Options"
+  // button on the product's card in Categories/Search/Home, which already
+  // has the complete live picker.
+  const addDefaultToCart = useCallback(() => {
+    if (!product || !defaultVariant) return;
+    const shared = {
+      productId,
+      quantity: 1,
+      name: product.name,
+      imageUri: product.imageUri,
+      price: product.price,
+      originalPrice: product.mrp,
+      unit: product.unit,
+    };
+    if (liveOptionsMode === 'quantity-choices') {
+      // This quick-add button doesn't fetch the full quantity-choices
+      // list (only the plain detail payload), so it can't know the
+      // shopper's usual pick size the way ProductCard's options sheet
+      // can - `apiBaseQty: 1` is a deliberate simplification meaning
+      // "1 of this product's own root unit" (e.g. 1 kg), not a specific
+      // choice. See `cartStore.ts`'s comment on `apiBaseQty` for why this
+      // has to be a real root-unit amount, not a selection count.
+      setCustomQuantityLine({
+        ...shared,
+        apiVariantId: defaultVariant.variantId,
+        apiBaseQty: 1,
+      });
+    } else {
+      addVariantLine({
+        ...shared,
+        variantId: String(defaultVariant.variantId),
+        apiVariantId: defaultVariant.variantId,
+      });
+    }
+  }, [
+    product,
+    defaultVariant,
+    liveOptionsMode,
+    productId,
+    addVariantLine,
+    setCustomQuantityLine,
+  ]);
+
   const handleIncrement = useCallback(() => {
-    if (quantity === 0) addItem(productId);
-    else updateQuantity(productId, quantity + 1);
-  }, [quantity, productId, addItem, updateQuantity]);
+    if (quantity === 0) {
+      addDefaultToCart();
+    } else {
+      updateQuantity(cartLineId, quantity + 1);
+    }
+  }, [quantity, cartLineId, addDefaultToCart, updateQuantity]);
   const handleDecrement = useCallback(() => {
-    updateQuantity(productId, quantity - 1);
-  }, [quantity, productId, updateQuantity]);
+    updateQuantity(cartLineId, quantity - 1);
+  }, [quantity, cartLineId, updateQuantity]);
 
   // Mirrors ProductCard's own "don't double-count" rule (see its comment):
   // only actually adds when nothing's in the cart yet - the adjacent
   // stepper is what changes the quantity from there, so this button
   // re-adding on every tap would double it, same bug as before.
   const handleAddToCart = useCallback(() => {
-    if (quantity === 0) addItem(productId);
-  }, [quantity, productId, addItem]);
+    if (quantity === 0) addDefaultToCart();
+  }, [quantity, addDefaultToCart]);
 
   const handleBuyNow = useCallback(() => {
     // No checkout flow exists yet - same "coming soon" pattern used across
@@ -108,24 +231,47 @@ export function ProductDetailsScreen() {
     Alert.alert('Buy Now', "This isn't wired up yet - coming soon.");
   }, []);
 
-  const handleSheetAddOption = useCallback(() => {
-    // The cart store only tracks { productId, quantity } - it has no
-    // concept of a selected weight variant yet, so every option adds the
-    // same base product. TODO: extend CartItem with a variant id once the
-    // cart actually needs to distinguish "500g" from "1kg" of the same
-    // product.
-    addItem(productId);
-    setSheetVisible(false);
-  }, [productId, addItem]);
+  // Same add-to-cart routing `CategoriesScreen`/`SearchScreen`/`HomeScreen`
+  // use for their own `ProductCard` grids - duplicated here (one function,
+  // not worth a shared hook for yet) rather than imported, same kind of
+  // cross-feature exception `ProductCard.tsx` itself already makes.
+  const handleAddOptionsToCart = useCallback(
+    (similarProduct: Product, variant: ProductVariant, pickedQuantity: number) => {
+      const shared = {
+        productId: similarProduct.id,
+        quantity: pickedQuantity,
+        name: similarProduct.name,
+        imageUri: similarProduct.imageUri,
+        price: variant.price,
+        originalPrice: variant.mrp,
+        unit: variant.label,
+        apiVariantId: variant.apiVariantId,
+      };
+      if (variant.isCustomQuantitySelection) {
+        setCustomQuantityLine({
+          ...shared,
+          apiBaseQty: variant.apiBaseQty,
+          // Snapshotted so the cart screen's own stepper can step this
+          // line by the product's real `stepQty` - see `cartStore.ts`'s
+          // `CartItem.quantityRule`.
+          quantityRule: variant.quantityRule,
+          pricingUnitLabel: variant.pricingUnitLabel,
+        });
+      } else {
+        addVariantLine({ ...shared, variantId: variant.id });
+      }
+    },
+    [addVariantLine, setCustomQuantityLine],
+  );
 
-  const handleSheetAddCustom = useCallback(() => {
-    // Same limitation as handleSheetAddOption - the custom quantity/price
-    // computed in the sheet isn't tracked, only that the product was added.
-    addItem(productId);
-    setSheetVisible(false);
-  }, [productId, addItem]);
+  const handleSimilarProductPress = useCallback(
+    (similarProduct: Product) => {
+      navigation.push('ProductDetails', { productId: similarProduct.id });
+    },
+    [navigation],
+  );
 
-  if (!product || !details) {
+  if (!validId) {
     return (
       <SafeAreaView
         style={[styles.safe, { backgroundColor: colors.background }]}
@@ -141,12 +287,44 @@ export function ProductDetailsScreen() {
     );
   }
 
+  if (liveVariantsQuery.isLoading) {
+    return (
+      <SafeAreaView
+        style={[styles.safe, { backgroundColor: colors.background }]}
+        edges={['top']}
+      >
+        <Loader fullscreen />
+      </SafeAreaView>
+    );
+  }
+
+  if (liveVariantsQuery.isError || !product) {
+    return (
+      <SafeAreaView
+        style={[styles.safe, { backgroundColor: colors.background }]}
+        edges={['top']}
+      >
+        <ErrorView
+          title="Couldn't load this product"
+          body="Check your connection and try again."
+          onRetry={() => liveVariantsQuery.refetch()}
+        />
+      </SafeAreaView>
+    );
+  }
+
   const galleryImages = Array.from(
     { length: GALLERY_IMAGE_COUNT },
     () => product.imageUri,
   );
-  const originalPrice = details.weightOptions[0].originalPrice;
+  const originalPrice = product.mrp ?? product.price;
   const savings = originalPrice - product.price;
+  // A live product never sets `Product.discountPercent` directly (see
+  // `mapCustomerProductCardToProduct`), so this is always derived from
+  // the real prices above instead of ever showing "undefined%".
+  const discountPercent =
+    product.discountPercent ??
+    (savings > 0 ? Math.round((savings / originalPrice) * 100) : 0);
 
   return (
     <SafeAreaView
@@ -196,7 +374,7 @@ export function ProductDetailsScreen() {
       <ScrollView showsVerticalScrollIndicator={false}>
         <ProductImageCarousel
           images={galleryImages}
-          discountPercent={product.discountPercent}
+          discountPercent={discountPercent}
           isWishlisted={isWishlisted}
           onToggleWishlist={() => toggleWishlist(productId)}
           onShare={handleShare}
@@ -206,7 +384,6 @@ export function ProductDetailsScreen() {
           <View style={styles.titleRow}>
             <View style={styles.titleTextWrap}>
               <Text style={styles.name}>{product.name}</Text>
-              <Text style={styles.unit}>{product.unit}</Text>
             </View>
           </View>
 
@@ -217,62 +394,27 @@ export function ProductDetailsScreen() {
                 <Text style={styles.originalPrice}>₹{originalPrice}</Text>
               )}
             </View>
-            <Pressable
-              style={styles.addPill}
-              onPress={() => setSheetVisible(true)}
-              accessibilityRole="button"
-              accessibilityLabel="Choose options and add to cart"
-            >
-              <Text style={styles.addPillText}>Add</Text>
-              <icons.chevronDown
-                color={colors.primary}
-                size={16}
-                strokeWidth={2.5}
-              />
-            </Pressable>
+            {/* Same options button + variant-picker sheet ProductCard uses
+                everywhere else in the app (Home/Categories/Search) -
+                see ProductOptionsSheet.tsx's own comment. */}
+            <ProductOptionsSheet product={product} onAddToCart={handleAddOptionsToCart} />
           </View>
 
           {savings > 0 && (
             <Text style={styles.savingsText}>
-              You save ₹{savings} ({product.discountPercent}%)
+              You save ₹{savings} ({discountPercent}%)
             </Text>
           )}
 
           <ProductTrustBadges />
-
-          <Text style={styles.sectionTitle}>Product Description</Text>
-          <Text
-            style={styles.description}
-            numberOfLines={descExpanded ? undefined : 3}
-          >
-            {details.description}
-          </Text>
-          <Pressable
-            onPress={() => setDescExpanded(v => !v)}
-            hitSlop={8}
-            style={styles.readMoreRow}
-          >
-            <Text style={styles.readMoreText}>
-              {descExpanded ? 'Read less' : 'Read more'}
-            </Text>
-            <icons.chevronDown
-              color={colors.primary}
-              size={14}
-              strokeWidth={2.5}
-              style={descExpanded ? styles.chevronFlipped : undefined}
-            />
-          </Pressable>
         </View>
 
-        {details.similarProducts.length > 0 && (
+        {similarProducts.length > 0 && (
           <ProductSection
-            title="Similar products"
-            products={details.similarProducts}
-            onAddToCart={() => {}}
-            onProductPress={p =>
-              navigation.push('ProductDetails', { productId: p.id })
-            }
-            onViewAll={() => {}}
+            title="Similar Products"
+            products={similarProducts}
+            onAddToCart={handleAddOptionsToCart}
+            onProductPress={handleSimilarProductPress}
           />
         )}
       </ScrollView>
@@ -283,16 +425,6 @@ export function ProductDetailsScreen() {
         onDecrement={handleDecrement}
         onAddToCart={handleAddToCart}
         onBuyNow={handleBuyNow}
-      />
-
-      <ProductOptionsSheet
-        visible={sheetVisible}
-        onClose={() => setSheetVisible(false)}
-        product={product}
-        weightOptions={details.weightOptions}
-        baseGrams={details.baseGrams}
-        onAddOption={handleSheetAddOption}
-        onAddCustom={handleSheetAddCustom}
       />
     </SafeAreaView>
   );
@@ -413,32 +545,6 @@ function createStyles(colors: ThemeColors) {
       fontFamily: fonts.semiBold,
       color: colors.primary,
       marginTop: spacing.xs,
-    },
-    sectionTitle: {
-      fontSize: 15,
-      fontFamily: fonts.bold,
-      color: colors.textPrimary,
-      marginTop: spacing.lg,
-      marginBottom: spacing.xs,
-    },
-    description: {
-      fontSize: 13,
-      lineHeight: 20,
-      color: colors.textSecondary,
-    },
-    readMoreRow: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: 2,
-      marginTop: spacing.xs,
-    },
-    readMoreText: {
-      fontSize: 13,
-      fontFamily: fonts.bold,
-      color: colors.primary,
-    },
-    chevronFlipped: {
-      transform: [{ rotate: '180deg' }],
     },
   });
 }

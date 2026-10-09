@@ -6,11 +6,13 @@ import { useProfileStore } from '@/store/profileStore';
 import {
   updateProfileApi,
   type UpdateProfilePayload,
-  type UserProfile,
+  type MyProfile,
 } from '../api/profileApi';
 
 /**
- * PATCH /api/v1/users/me/profile/ - { first_name, last_name }.
+ * PATCH /api/v1/users/me/ - { first_name, last_name }. (Previously pointed
+ * at /users/me/profile/, the EXTENDED-profile endpoint - fixed in
+ * `profileApi.ts`, see that file's comment.)
  *
  * Same best-effort pattern as `useLogout`: the local `profileStore` is
  * always updated in `onSettled`, regardless of whether the network call
@@ -23,7 +25,7 @@ export const useUpdateProfile = () => {
   const queryClient = useQueryClient();
   const updateProfile = useProfileStore(state => state.updateProfile);
 
-  return useMutation<UserProfile, Error, UpdateProfilePayload>({
+  return useMutation<MyProfile, Error, UpdateProfilePayload>({
     mutationFn: payload => updateProfileApi(payload),
     onSettled: (_data, _error, variables) => {
       updateProfile(variables);

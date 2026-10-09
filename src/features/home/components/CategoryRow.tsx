@@ -2,30 +2,57 @@ import React, { useMemo } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { LayoutGrid } from 'lucide-react-native';
 
-import { fonts, spacing, useTheme, type ThemeColors } from '@/theme';
+import { AppImage, Skeleton } from '@/components';
+import { fonts, radius, spacing, useTheme, type ThemeColors } from '@/theme';
 
-interface Category {
-  id: string;
+/** Placeholder tiles shown while the groups load. */
+const SKELETON_COUNT = 5;
+
+/** One tile in the strip - deliberately source-agnostic (Home feeds it
+ * catalogue groups, the same ones the Categories sidebar lists). */
+export interface CategoryRowItem {
+  id: number;
   label: string;
-  emoji?: string;
-  isMore?: boolean;
+  imageUrl: string | null;
 }
-
-const CATEGORIES: Category[] = [
-  { id: 'vegetables', label: 'Vegetables', emoji: '🥦' },
-  { id: 'fruits', label: 'Fruits', emoji: '🍎' },
-  { id: 'leafy', label: 'Leafy Greens', emoji: '🥬' },
-  { id: 'herbs', label: 'Herbs', emoji: '🌿' },
-  { id: 'more', label: 'More', isMore: true },
-];
 
 interface CategoryRowProps {
-  onCategoryPress?: (id: string) => void;
+  items: CategoryRowItem[] | undefined;
+  isLoading: boolean;
+  /** Called with the tapped tile's id. */
+  onItemPress?: (id: number) => void;
+  /** The trailing "More" tile - opens the full catalogue. */
+  onMorePress?: () => void;
 }
 
-export function CategoryRow({ onCategoryPress }: CategoryRowProps) {
+/**
+ * Home's group strip. Loading shows tile-shaped skeletons; an empty/failed
+ * fetch renders nothing (the Categories tab is still one tap away in the
+ * tab bar, and pull-to-refresh retries).
+ */
+export function CategoryRow({
+  items,
+  isLoading,
+  onItemPress,
+  onMorePress,
+}: CategoryRowProps) {
   const { colors } = useTheme();
   const styles = useMemo(() => createStyles(colors), [colors]);
+
+  if (isLoading) {
+    return (
+      <View style={styles.container}>
+        {Array.from({ length: SKELETON_COUNT }, (_, i) => (
+          <View key={i} style={styles.item}>
+            <Skeleton width={44} height={44} borderRadius={radius.full} />
+            <Skeleton width={40} height={8} style={styles.skeletonLabel} />
+          </View>
+        ))}
+      </View>
+    );
+  }
+
+  if (!items || items.length === 0) return null;
 
   return (
     <ScrollView
@@ -33,24 +60,53 @@ export function CategoryRow({ onCategoryPress }: CategoryRowProps) {
       showsHorizontalScrollIndicator={false}
       contentContainerStyle={styles.container}
     >
-      {CATEGORIES.map(cat => (
-        <Pressable
-          key={cat.id}
-          style={styles.item}
-          onPress={() => onCategoryPress?.(cat.id)}
-        >
-          <View style={styles.iconWrap}>
-            {cat.isMore ? (
-              <LayoutGrid color={colors.textPrimary} size={20} />
-            ) : (
-              <Text style={styles.emoji}>{cat.emoji}</Text>
-            )}
-          </View>
-          <Text style={styles.label} numberOfLines={1}>
-            {cat.label}
-          </Text>
-        </Pressable>
-      ))}
+      {items.map(item => {
+        const label = item.label;
+        return (
+          <Pressable
+            key={item.id}
+            style={styles.item}
+            onPress={() => onItemPress?.(item.id)}
+            accessibilityRole="button"
+            accessibilityLabel={label}
+          >
+            <View style={styles.iconWrap}>
+              {item.imageUrl ? (
+                <AppImage
+                  source={{ uri: item.imageUrl }}
+                  style={styles.image}
+                  resizeMode="contain"
+                />
+              ) : (
+                // No artwork uploaded for this group - an initial on a
+                // soft disc reads as intentional rather than a blank gap.
+                <View style={styles.initialDisc}>
+                  <Text style={styles.initial}>
+                    {label.trim().charAt(0).toUpperCase()}
+                  </Text>
+                </View>
+              )}
+            </View>
+            <Text style={styles.label} numberOfLines={1}>
+              {label}
+            </Text>
+          </Pressable>
+        );
+      })}
+
+      <Pressable
+        style={styles.item}
+        onPress={onMorePress}
+        accessibilityRole="button"
+        accessibilityLabel="More groups"
+      >
+        <View style={styles.iconWrap}>
+          <LayoutGrid color={colors.textPrimary} size={20} />
+        </View>
+        <Text style={styles.label} numberOfLines={1}>
+          More
+        </Text>
+      </Pressable>
     </ScrollView>
   );
 }
@@ -67,17 +123,30 @@ function createStyles(colors: ThemeColors) {
       alignItems: 'center',
       width: 56,
     },
-    // No circle/background/border anymore - just a plain sizing box so the
-    // icon/emoji and label below it stay aligned, slightly smaller overall
-    // than before (48 -> was effectively 60 via the old circle).
+    // No circle/background/border around the artwork - just a plain sizing
+    // box so the image and the label below it stay aligned.
     iconWrap: {
       width: 48,
       height: 48,
       alignItems: 'center',
       justifyContent: 'center',
     },
-    emoji: {
-      fontSize: 24,
+    image: {
+      width: 44,
+      height: 44,
+    },
+    initialDisc: {
+      width: 44,
+      height: 44,
+      borderRadius: radius.full,
+      backgroundColor: colors.surface,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    initial: {
+      fontSize: 18,
+      fontFamily: fonts.bold,
+      color: colors.textPrimary,
     },
     label: {
       fontSize: 10,
@@ -85,6 +154,9 @@ function createStyles(colors: ThemeColors) {
       color: colors.textPrimary,
       marginTop: 2,
       textAlign: 'center',
+    },
+    skeletonLabel: {
+      marginTop: spacing.xs,
     },
   });
 }

@@ -16,6 +16,11 @@ import {
   type ViewStyle,
 } from 'react-native';
 
+import Animated, {
+  cubicBezier,
+  useReducedMotion,
+} from 'react-native-reanimated';
+
 import {
   radius,
   spacing,
@@ -35,9 +40,17 @@ type RNTextInputBlurHandler = NonNullable<
 >;
 
 export interface TextInputProps {
+  animatedFocus?: boolean;
+  accessibilityLabel?: string;
+  accessibilityHint?: string;
+  autoComplete?: ComponentProps<typeof RNTextInput>['autoComplete'];
+  textContentType?: ComponentProps<typeof RNTextInput>['textContentType'];
+  inputContainerStyle?: StyleProp<ViewStyle>;
   value: string;
   onChangeText: (text: string) => void;
   placeholder?: string;
+  /** Overrides the placeholder colour (defaults to the secondary text colour). */
+  placeholderTextColor?: string;
   label?: string;
   /** Validation/error message. When present, the input renders in an error state. */
   error?: string;
@@ -68,9 +81,16 @@ export interface TextInputProps {
 export const TextInput = forwardRef<RNTextInput, TextInputProps>(
   function TextInputInner(
     {
+      animatedFocus = false,
+      accessibilityLabel,
+      accessibilityHint,
+      autoComplete,
+      textContentType,
+      inputContainerStyle,
       value,
       onChangeText,
       placeholder,
+      placeholderTextColor,
       label,
       error,
       disabled = false,
@@ -93,6 +113,15 @@ export const TextInput = forwardRef<RNTextInput, TextInputProps>(
     const styles = useMemo(() => createStyles(colors), [colors]);
     const [isFocused, setIsFocused] = useState(false);
     const hasError = Boolean(error);
+    const reducedMotion = useReducedMotion();
+    const focusTransition = useMemo(
+      () => ({
+        transitionProperty: 'borderColor' as const,
+        transitionDuration: reducedMotion ? 0 : 150,
+        transitionTimingFunction: cubicBezier(0.23, 1, 0.32, 1),
+      }),
+      [reducedMotion],
+    );
 
     const handleFocus: RNTextInputFocusHandler = e => {
       setIsFocused(true);
@@ -108,9 +137,11 @@ export const TextInput = forwardRef<RNTextInput, TextInputProps>(
       <View style={[styles.wrapper, containerStyle]}>
         {label ? <Text style={styles.label}>{label}</Text> : null}
 
-        <View
+        <Animated.View
           style={[
             styles.inputContainer,
+            inputContainerStyle,
+            animatedFocus && focusTransition,
             isFocused && styles.inputContainerFocused,
             hasError && styles.inputContainerError,
             disabled && styles.inputContainerDisabled,
@@ -119,10 +150,15 @@ export const TextInput = forwardRef<RNTextInput, TextInputProps>(
           {leftAccessory}
           <RNTextInput
             ref={ref}
+            accessibilityLabel={accessibilityLabel ?? label}
+            accessibilityHint={accessibilityHint}
+            autoComplete={autoComplete}
+            textContentType={textContentType}
+            selectionColor={colors.primary}
             value={value}
             onChangeText={onChangeText}
             placeholder={placeholder}
-            placeholderTextColor={colors.textSecondary}
+            placeholderTextColor={placeholderTextColor ?? colors.textSecondary}
             editable={!disabled}
             keyboardType={keyboardType}
             secureTextEntry={secureTextEntry}
@@ -135,9 +171,17 @@ export const TextInput = forwardRef<RNTextInput, TextInputProps>(
             testID={testID}
           />
           {rightAccessory}
-        </View>
+        </Animated.View>
 
-        {hasError ? <Text style={styles.errorText}>{error}</Text> : null}
+        {hasError ? (
+          <Text
+            accessibilityLiveRegion="polite"
+            accessibilityRole="alert"
+            style={[styles.errorText, animatedFocus && styles.authErrorText]}
+          >
+            {error}
+          </Text>
+        ) : null}
       </View>
     );
   },
@@ -178,6 +222,7 @@ function createStyles(colors: ThemeColors) {
       color: colors.textPrimary,
       paddingVertical: spacing.sm,
     },
+    authErrorText: { fontSize: 14, lineHeight: 20 },
     errorText: {
       ...typography.caption,
       color: colors.error,

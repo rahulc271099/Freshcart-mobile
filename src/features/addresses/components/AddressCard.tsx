@@ -10,12 +10,14 @@ import {
   useTheme,
   type ThemeColors,
 } from '@/theme';
-import type { Address, AddressLabel } from '../types/address.types';
+import type { Address, AddressType } from '../types/address.types';
+import { getAddressBlocker } from '../utils/addressReadiness';
+import { addressTypeLabel, formatAddressLine } from '../utils/formatAddress';
 
-const LABEL_ICON: Record<AddressLabel, typeof Home> = {
-  Home: Home,
-  Work: Briefcase,
-  Other: MapPin,
+const LABEL_ICON: Record<AddressType, typeof Home> = {
+  HOME: Home,
+  WORK: Briefcase,
+  OTHER: MapPin,
 };
 
 interface AddressCardProps {
@@ -33,22 +35,17 @@ export function AddressCard({
 }: AddressCardProps) {
   const { colors } = useTheme();
   const styles = useMemo(() => createStyles(colors), [colors]);
-  const LabelIcon = LABEL_ICON[address.label];
-
-  const fullAddress = [
-    address.address_line_1,
-    address.address_line_2,
-    `${address.city}, ${address.state} ${address.pincode}`.trim(),
-  ]
-    .filter(Boolean)
-    .join(', ');
+  const LabelIcon = LABEL_ICON[address.address_type ?? 'OTHER'];
+  const label = addressTypeLabel(address.address_type);
+  const fullAddress = formatAddressLine(address);
+  const blocker = getAddressBlocker(address);
 
   return (
     <View style={styles.card}>
       <View style={styles.headerRow}>
         <View style={styles.labelWrap}>
           <LabelIcon color={colors.primary} size={16} strokeWidth={2} />
-          <Text style={styles.labelText}>{address.label}</Text>
+          <Text style={styles.labelText}>{label}</Text>
         </View>
         {address.is_default && (
           <View style={styles.defaultBadge}>
@@ -57,7 +54,16 @@ export function AddressCard({
         )}
       </View>
 
+      <Text style={styles.contactText}>
+        {address.contact_name} · {address.contact_mobile}
+      </Text>
       <Text style={styles.addressText}>{fullAddress}</Text>
+      {blocker ? <Text style={styles.blockerText}>{blocker}</Text> : null}
+      {address.delivery_instructions ? (
+        <Text style={styles.instructionsText} numberOfLines={2}>
+          Note: {address.delivery_instructions}
+        </Text>
+      ) : null}
 
       <View style={styles.actionsRow}>
         {!address.is_default && (
@@ -70,7 +76,7 @@ export function AddressCard({
             style={styles.iconBtn}
             onPress={onEdit}
             hitSlop={8}
-            accessibilityLabel={`Edit ${address.label} address`}
+            accessibilityLabel={`Edit ${label} address`}
           >
             <Pencil color={colors.textSecondary} size={16} strokeWidth={2} />
           </Pressable>
@@ -78,7 +84,7 @@ export function AddressCard({
             style={styles.iconBtn}
             onPress={onDelete}
             hitSlop={8}
-            accessibilityLabel={`Delete ${address.label} address`}
+            accessibilityLabel={`Delete ${label} address`}
           >
             <Trash2 color={colors.error} size={16} strokeWidth={2} />
           </Pressable>
@@ -127,11 +133,30 @@ function createStyles(colors: ThemeColors) {
       color: colors.primary,
       letterSpacing: 0.5,
     },
+    blockerText: {
+      fontSize: 12,
+      fontFamily: fonts.semiBold,
+      color: colors.error,
+      marginTop: spacing.xs,
+    },
+    contactText: {
+      fontSize: 13,
+      fontFamily: fonts.semiBold,
+      color: colors.textPrimary,
+      marginTop: spacing.xs,
+    },
     addressText: {
       fontSize: 13,
       fontFamily: fonts.regular,
       color: colors.textSecondary,
       lineHeight: 19,
+      marginTop: 2,
+    },
+    instructionsText: {
+      fontSize: 12,
+      fontFamily: fonts.regular,
+      color: colors.textSecondary,
+      fontStyle: 'italic',
       marginTop: spacing.xs,
     },
     actionsRow: {

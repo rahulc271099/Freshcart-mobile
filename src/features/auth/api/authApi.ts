@@ -20,11 +20,18 @@ export interface VerifyOtpRequest {
 /**
  * Shape returned by POST /users/auth/otp/verify/.
  * The server issues access + refresh tokens once OTP is confirmed.
+ * Matches `AuthTokensSerializer` exactly - `access_expires_in`/
+ * `refresh_expires_in`/`token_type` are real fields the backend sends
+ * (previously missing from this type) even though nothing here consumes
+ * them yet.
  */
 export interface VerifyOtpResponse {
   data: {
     access_token: string;
     refresh_token: string;
+    access_expires_in: number;
+    refresh_expires_in: number;
+    token_type: string;
   };
 }
 
@@ -37,6 +44,9 @@ interface RefreshTokenApiResponse {
   data: {
     access_token: string;
     refresh_token: string;
+    access_expires_in: number;
+    refresh_expires_in: number;
+    token_type: string;
   };
 }
 

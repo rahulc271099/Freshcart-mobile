@@ -14,6 +14,11 @@ import { fonts, radius, spacing, useTheme, type ThemeColors } from '@/theme';
 export interface CheckoutFooterProps {
   total: number;
   onCheckout: () => void;
+  /** Blocks checkout (e.g. below the area's minimum order) - the button
+   * dims and ignores presses; pair with `hint` to say why. */
+  disabled?: boolean;
+  /** One-line reason shown above the bar while `disabled`. */
+  hint?: string | null;
   style?: StyleProp<ViewStyle>;
 }
 
@@ -26,13 +31,21 @@ export interface CheckoutFooterProps {
 export function CheckoutFooter({
   total,
   onCheckout,
+  disabled = false,
+  hint,
   style,
 }: CheckoutFooterProps) {
   const { colors } = useTheme();
   const styles = useMemo(() => createStyles(colors), [colors]);
 
   return (
-    <View style={[styles.footer, style]}>
+    <View style={style}>
+      {hint ? (
+        <View style={styles.hintBar}>
+          <Text style={styles.hintText}>{hint}</Text>
+        </View>
+      ) : null}
+    <View style={styles.footer}>
       <View style={styles.secureRow}>
         <View style={styles.secureIcon}>
           <icons.shield color={colors.primary} size={18} strokeWidth={2} />
@@ -42,7 +55,13 @@ export function CheckoutFooter({
           <Text style={styles.secureSubtitle}>100% secure payments</Text>
         </View>
       </View>
-      <Pressable style={styles.checkoutBtn} onPress={onCheckout}>
+      <Pressable
+        style={[styles.checkoutBtn, disabled && styles.checkoutBtnDisabled]}
+        onPress={onCheckout}
+        disabled={disabled}
+        accessibilityRole="button"
+        accessibilityState={{ disabled }}
+      >
         <View>
           <Text style={styles.checkoutLabel}>Proceed to Checkout</Text>
           <Text style={styles.checkoutAmount}>₹{total}</Text>
@@ -53,6 +72,7 @@ export function CheckoutFooter({
           strokeWidth={2.5}
         />
       </Pressable>
+    </View>
     </View>
   );
 }
@@ -107,6 +127,20 @@ function createStyles(colors: ThemeColors) {
       borderRadius: radius.lg,
       paddingHorizontal: spacing.md,
       paddingVertical: spacing.sm,
+    },
+    checkoutBtnDisabled: {
+      opacity: 0.45,
+    },
+    hintBar: {
+      backgroundColor: `${colors.warning}1F`,
+      paddingHorizontal: spacing.md,
+      paddingVertical: spacing.xs + 2,
+    },
+    hintText: {
+      fontSize: 12,
+      fontFamily: fonts.semiBold,
+      color: colors.textPrimary,
+      textAlign: 'center',
     },
     checkoutLabel: {
       fontSize: 14,

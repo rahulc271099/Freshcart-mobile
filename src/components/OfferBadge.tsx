@@ -10,8 +10,18 @@ import {
 import { fonts, radius, useTheme, type ThemeColors } from '@/theme';
 
 export interface OfferBadgeProps {
-  /** Discount percentage, e.g. 5 renders "5% / OFF". */
-  percent: number;
+  /** Discount percentage, e.g. 5 renders "5% / OFF". Mutually exclusive
+   * with `label` - pass exactly one. */
+  percent?: number;
+  /** Flat rupee discount, e.g. 20 renders "₹20 / OFF" - for FLAT offers,
+   * where a percentage would be wrong. Comes straight from the backend's
+   * own `discountAmount`; never computed here. Ignored when `percent` is
+   * set. */
+  amount?: number;
+  /** Pre-formatted backend offer text (e.g. "10% off", a flat-amount or
+   * non-percent offer label) - used as-is instead of a computed number,
+   * for offers that can't (or shouldn't) be reduced to a percentage. */
+  label?: string;
   /**
    * Positioning is left to the caller (e.g. `position: 'absolute', top, left`
    * over a product image) - this component only owns its own look, same as
@@ -28,14 +38,33 @@ export interface OfferBadgeProps {
  * `features/home` and `features/categories` product cards so both read as
  * the same design instead of two divergent badge implementations.
  */
-export function OfferBadge({ percent, style, testID }: OfferBadgeProps) {
+export function OfferBadge({
+  percent,
+  amount,
+  label,
+  style,
+  testID,
+}: OfferBadgeProps) {
   const { colors } = useTheme();
   const styles = useMemo(() => createStyles(colors), [colors]);
 
   return (
     <View style={[styles.badge, style]} testID={testID}>
-      <Text style={styles.percent}>{percent}%</Text>
-      <Text style={styles.off}>OFF</Text>
+      {percent != null ? (
+        <>
+          <Text style={styles.percent}>{percent}%</Text>
+          <Text style={styles.off}>OFF</Text>
+        </>
+      ) : amount != null ? (
+        <>
+          <Text style={styles.percent}>₹{amount}</Text>
+          <Text style={styles.off}>OFF</Text>
+        </>
+      ) : (
+        <Text style={styles.label} numberOfLines={2}>
+          {label}
+        </Text>
+      )}
     </View>
   );
 }
@@ -61,6 +90,13 @@ function createStyles(colors: ThemeColors) {
       fontSize: 8,
       fontFamily: fonts.semiBold,
       lineHeight: 10,
+    },
+    label: {
+      color: colors.textInverse,
+      fontSize: 9,
+      fontFamily: fonts.bold,
+      lineHeight: 11,
+      textAlign: 'center',
     },
   });
 }

@@ -39,21 +39,15 @@ import { StyleSheet, Text, View } from 'react-native';
 export function ComingSoonScreen({ label }: { label: string }) {
   return (
     <View style={styles.container}>
-      <Text style={{ fontFamily: 'Inter-Regular', fontSize: 40 }}>
-  Regular
-</Text>
+      <Text style={{ fontFamily: 'Inter-Regular', fontSize: 40 }}>Regular</Text>
 
-<Text style={{ fontFamily: 'Inter-Medium', fontSize: 40 }}>
-  Medium
-</Text>
+      <Text style={{ fontFamily: 'Inter-Medium', fontSize: 40 }}>Medium</Text>
 
-<Text style={{ fontFamily: 'Inter-SemiBold', fontSize: 40 }}>
-  SemiBold
-</Text>
+      <Text style={{ fontFamily: 'Inter-SemiBold', fontSize: 40 }}>
+        SemiBold
+      </Text>
 
-<Text style={{ fontFamily: 'Inter-Bold', fontSize: 40 }}>
-  Bold
-</Text>
+      <Text style={{ fontFamily: 'Inter-Bold', fontSize: 40 }}>Bold</Text>
     </View>
   );
 }

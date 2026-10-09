@@ -5,41 +5,71 @@ import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { MapPin } from 'lucide-react-native';
 
-import { Button, Header } from '@/components';
+import { Button, ErrorView, Header, Loader } from '@/components';
 import type { MainStackParamList } from '@/app/navigation/navigationTypes';
-import { useAddressStore } from '@/store/addressStore';
 import { fonts, spacing, useTheme, type ThemeColors } from '@/theme';
 import { AddressCard } from '../components/AddressCard';
+import { useAddresses } from '../hooks/useAddresses';
+import { useDeleteAddress } from '../hooks/useDeleteAddress';
+import { useSetDefaultAddress } from '../hooks/useSetDefaultAddress';
+import { addressTypeLabel } from '../utils/formatAddress';
 import type { Address } from '../types/address.types';
 
+/**
+ * Reads straight off the real `GET /users/me/addresses/` endpoint (via
+ * `useAddresses`, a TanStack Query hook shared with the checkout flow) -
+ * previously this screen ran on a local, MMKV-persisted, demo-seeded
+ * Zustand store that never called the real API at all.
+ */
 export function AddressesScreen() {
   const { colors } = useTheme();
   const styles = useMemo(() => createStyles(colors), [colors]);
   const navigation =
     useNavigation<NativeStackNavigationProp<MainStackParamList>>();
 
-  const addresses = useAddressStore(state => state.addresses);
-  const removeAddress = useAddressStore(state => state.removeAddress);
-  const setDefaultAddress = useAddressStore(state => state.setDefaultAddress);
+  const { data: addresses = [], isLoading, isError, refetch } = useAddresses();
+  const deleteAddress = useDeleteAddress();
+  const setDefaultAddress = useSetDefaultAddress();
 
   const handleGoBack = useCallback(() => navigation.goBack(), [navigation]);
 
   const handleDelete = useCallback(
     (address: Address) => {
       Alert.alert(
-        `Delete ${address.label} address?`,
+        `Delete ${addressTypeLabel(address.address_type)} address?`,
         'This cannot be undone.',
         [
           { text: 'Cancel', style: 'cancel' },
           {
             text: 'Delete',
             style: 'destructive',
-            onPress: () => removeAddress(address.id),
+            onPress: () =>
+              deleteAddress.mutate(address.address_id, {
+                onError: error => {
+                  console.log('🚀 ~ AddressesScreen ~ delete error:', error);
+                  Alert.alert(
+                    'Could not delete address',
+                    'Please try again.',
+                  );
+                },
+              }),
           },
         ],
       );
     },
-    [removeAddress],
+    [deleteAddress],
+  );
+
+  const handleSetDefault = useCallback(
+    (address: Address) => {
+      setDefaultAddress.mutate(address.address_id, {
+        onError: error => {
+          console.log('🚀 ~ AddressesScreen ~ set-default error:', error);
+          Alert.alert('Could not update default address', 'Please try again.');
+        },
+      });
+    },
+    [setDefaultAddress],
   );
 
   return (
@@ -53,7 +83,11 @@ export function AddressesScreen() {
         style={styles.header}
       />
 
-      {addresses.length === 0 ? (
+      {isLoading ? (
+        <Loader fullscreen />
+      ) : isError ? (
+        <ErrorView title="Couldn't load your addresses" onRetry={refetch} />
+      ) : addresses.length === 0 ? (
         <View style={styles.empty}>
           <MapPin color={colors.textSecondary} size={40} strokeWidth={1.5} />
           <Text style={styles.emptyTitle}>No saved addresses</Text>
@@ -69,15 +103,17 @@ export function AddressesScreen() {
       ) : (
         <FlatList
           data={addresses}
-          keyExtractor={item => item.id}
+          keyExtractor={item => String(item.address_id)}
           renderItem={({ item }) => (
             <AddressCard
               address={item}
               onEdit={() =>
-                navigation.navigate('AddEditAddress', { addressId: item.id })
+                navigation.navigate('AddEditAddress', {
+                  addressId: item.address_id,
+                })
               }
               onDelete={() => handleDelete(item)}
-              onSetDefault={() => setDefaultAddress(item.id)}
+              onSetDefault={() => handleSetDefault(item)}
             />
           )}
           contentContainerStyle={styles.list}

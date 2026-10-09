@@ -10,8 +10,19 @@ import Config from 'react-native-config';
  * convention already used for `android/local.properties` (Maps key) and
  * the Firebase config files.
  */
+const BASE_URL = Config.API_BASE_URL ?? '';
+
 const API_CONFIG = {
-  BASE_URL: Config.API_BASE_URL ?? '',
+  BASE_URL,
+  /**
+   * `BASE_URL` with its trailing API-version segment removed (e.g.
+   * `https://host/api/v1` -> `https://host/api`). A few public endpoints -
+   * the customer home-content ones (`/api/customer/home/banners`, ...) -
+   * live directly under `/api/`, NOT under `/api/v1/` like everything
+   * else, so they can't be reached with a plain relative path off
+   * `BASE_URL`. See `services/api/apiConfig.ts`'s `HOME` block.
+   */
+  ROOT_URL: BASE_URL.replace(/\/v\d+\/?$/, ''),
   APP_VERSION: '0.1',
   USER_AGENT: 'mobile',
 } as const;

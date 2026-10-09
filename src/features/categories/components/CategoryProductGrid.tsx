@@ -1,15 +1,21 @@
 import React, { useCallback } from 'react';
 import { FlatList, StyleSheet, View } from 'react-native';
 
+import { ProductCard, type Product, type ProductVariant } from '@/components';
 import { spacing } from '@/theme';
-import {
-  CategoryProductCard,
-  type CategoryProduct,
-} from './CategoryProductCard';
 
 export interface CategoryProductGridProps {
-  products: CategoryProduct[];
-  onAddToCart: (product: CategoryProduct) => void;
+  products: Product[];
+  onAddToCart: (
+    product: Product,
+    variant: ProductVariant,
+    quantity: number,
+  ) => void;
+  /** A shopper tapped a card (not its "Options"/"ADD" control) - opens
+   * Product Details. Was previously never wired up at all: `ProductCard`
+   * supports an `onPress` prop, but this grid never passed one through,
+   * so tapping a card here did nothing. */
+  onProductPress: (product: Product) => void;
   /** Extra bottom padding so the last row can clear the floating tab bar
    * (and CartBar, when visible) - same reasoning as CategorySidebar's. */
   bottomPadding: number;
@@ -18,20 +24,26 @@ export interface CategoryProductGridProps {
 /**
  * Categories screen's 2-column product grid. On the screen's main white
  * background; cards stay visually distinct via their own border/shadow
- * rather than a background-color shift.
+ * rather than a background-color shift. Uses the same shared `ProductCard`
+ * as Home - see `@/components/ProductCard.tsx`.
  */
 export function CategoryProductGrid({
   products,
   onAddToCart,
+  onProductPress,
   bottomPadding,
 }: CategoryProductGridProps) {
   const renderProduct = useCallback(
-    ({ item, index }: { item: CategoryProduct; index: number }) => (
-      <View style={[styles.item, index % 2 === 0 && styles.itemLeft]}>
-        <CategoryProductCard product={item} onAddToCart={onAddToCart} />
+    ({ item }: { item: Product }) => (
+      <View style={styles.item}>
+        <ProductCard
+          product={item}
+          onAddToCart={onAddToCart}
+          onPress={onProductPress}
+        />
       </View>
     ),
-    [onAddToCart],
+    [onAddToCart, onProductPress],
   );
 
   return (
@@ -40,6 +52,12 @@ export function CategoryProductGrid({
       keyExtractor={item => item.id}
       numColumns={2}
       renderItem={renderProduct}
+      // `flex: 1` on each item stretches a lone odd-item-out in the final
+      // row to fill the whole row width (nothing to share the flex with).
+      // A fixed percentage width plus `space-between` on the row itself
+      // keeps every card the same size regardless of how the last row
+      // fills up.
+      columnWrapperStyle={styles.row}
       contentContainerStyle={[styles.grid, { paddingBottom: bottomPadding }]}
       showsVerticalScrollIndicator={false}
     />
@@ -54,13 +72,11 @@ const styles = StyleSheet.create({
     padding: spacing.sm,
     paddingBottom: spacing.xxl,
   },
-  item: {
-    flex: 1,
-    marginBottom: spacing.sm,
-    marginLeft: spacing.xs,
+  row: {
+    justifyContent: 'space-between',
   },
-  itemLeft: {
-    marginLeft: 0,
-    marginRight: spacing.xs,
+  item: {
+    width: '48%',
+    marginBottom: spacing.sm,
   },
 });

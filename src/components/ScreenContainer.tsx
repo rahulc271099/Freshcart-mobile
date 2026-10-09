@@ -1,10 +1,11 @@
-import React, { type PropsWithChildren, type ReactNode } from 'react';
+import React, { type PropsWithChildren, type ReactNode, type Ref } from 'react';
 import {
   KeyboardAvoidingView,
   Platform,
   ScrollView,
   StyleSheet,
   View,
+  type ScrollViewProps,
   type StyleProp,
   type ViewStyle,
 } from 'react-native';
@@ -26,6 +27,13 @@ export interface ScreenContainerProps extends PropsWithChildren {
   backgroundColor?: string;
   style?: StyleProp<ViewStyle>;
   contentContainerStyle?: StyleProp<ViewStyle>;
+  /** Ref to the underlying ScrollView when `scrollable` (e.g. to scroll for the keyboard). */
+  scrollRef?: Ref<ScrollView>;
+  /** Extra ScrollView props (e.g. `bounces`) when `scrollable`. Layout props stay owned by this component. */
+  scrollViewProps?: Omit<
+    ScrollViewProps,
+    'style' | 'contentContainerStyle' | 'children'
+  >;
   testID?: string;
 }
 
@@ -45,6 +53,8 @@ export function ScreenContainer({
   backgroundColor,
   style,
   contentContainerStyle,
+  scrollRef,
+  scrollViewProps,
   testID,
 }: ScreenContainerProps) {
   const { colors } = useTheme();
@@ -54,6 +64,8 @@ export function ScreenContainer({
 
   const content: ReactNode = scrollable ? (
     <ScrollView
+      {...scrollViewProps}
+      ref={scrollRef}
       style={styles.flex}
       contentContainerStyle={[
         styles.scrollContent,

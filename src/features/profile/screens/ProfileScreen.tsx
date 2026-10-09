@@ -115,7 +115,7 @@ export function ProfileScreen() {
             subtitle="Track, return or buy again"
             iconBackgroundColor="rgba(23, 105, 224, 0.12)"
             iconColor={colors.primary}
-            onPress={() => showComingSoon('Orders')}
+            onPress={() => navigation.navigate('Orders')}
           />
           <ProfileMenuRow
             icon="wishlist"

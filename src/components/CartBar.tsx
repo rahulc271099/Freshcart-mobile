@@ -142,7 +142,7 @@ function createStyles(colors: ThemeColors) {
       paddingRight: spacing.xs,
       paddingVertical: spacing.xs,
       gap: spacing.xs,
-      ...shadows.lg,
+      ...shadows.sm,
     },
     offerRow: {
       flex: 1,

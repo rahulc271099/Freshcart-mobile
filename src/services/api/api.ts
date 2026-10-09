@@ -6,6 +6,7 @@ import {
   createResponseErrorInterceptor,
   requestInterceptor,
 } from './interceptors';
+import { denormalizeMoney } from './moneyFields';
 
 /**
  * The single configured Axios instance for the whole app. Feature API
@@ -25,7 +26,15 @@ api.interceptors.request.use(requestInterceptor, error =>
 );
 
 api.interceptors.response.use(
-  response => response,
+  // Every response body passes through `denormalizeMoney` exactly once,
+  // here - see that function's own comment for why this is necessary
+  // (every money field in this API is a JSON STRING on the wire, not a
+  // number) and why doing it centrally here is better than every feature
+  // `*Api.ts` file remembering to convert its own money fields itself.
+  response => {
+    response.data = denormalizeMoney(response.data);
+    return response;
+  },
   createResponseErrorInterceptor(api),
 );
 

@@ -1,20 +1,47 @@
 import { api } from '@/services/api/api';
 import API_CONFIG from '@/services/api/apiConfig';
+import type { ApiEnvelope } from '@/services/api/types';
 
 /**
- * Matches the confirmed contract:
- *   GET /api/v1/users/me/
- *
- * The full response shape beyond `first_name`/`last_name` isn't confirmed
- * yet, so this is documented as the best-known shape, not a guaranteed
- * complete one.
+ * Matches `UserSerializer` on the backend exactly - the `user` key inside
+ * `MyProfileSerializer`'s nested response (see `ProfileUser` below).
  */
-export type UserProfile = {
+export type ProfileUser = {
+  user_id: string;
+  user_code: string;
+  mobile_number: string;
+  email: string | null;
   first_name: string;
   last_name: string;
-  mobile_number?: string;
-  email?: string;
+  profile_image_url: string | null;
+  is_mobile_verified: boolean;
+  is_active: boolean;
+  last_login_at: string | null;
+  created_at: string;
 };
+
+/**
+ * Matches `MyProfileSerializer` on the backend exactly:
+ *   GET/PATCH /api/v1/users/me/
+ * returns this NESTED shape (not a flat user object), wrapped in the
+ * standard `users`-app envelope - see `ApiEnvelope<T>` in
+ * `services/api/types.ts`. `customer_profile`/`preferences` shapes aren't
+ * confirmed in detail yet, so they're left as open records rather than
+ * guessed.
+ */
+export type MyProfile = {
+  user: ProfileUser;
+  roles: string[];
+  customer_profile: Record<string, unknown> | null;
+  preferences: Record<string, unknown> | null;
+};
+
+/**
+ * @deprecated Kept only so any stray import of the old flat shape still
+ * compiles. The real response is `MyProfile` (nested under `.user`) - use
+ * that instead.
+ */
+export type UserProfile = ProfileUser;
 
 /**
  * Logs both the outgoing request and the outcome (success OR failure).
@@ -24,12 +51,14 @@ export type UserProfile = {
  * reaching a success log - `retry: false` + no error UI in `useProfile`
  * means that failure is otherwise completely invisible.
  */
-export const getProfileApi = async (): Promise<UserProfile> => {
+export const getProfileApi = async (): Promise<MyProfile> => {
   console.log('🚀 ~ getProfileApi ~ requesting:', API_CONFIG.USER.PROFILE);
   try {
-    const response = await api.get<UserProfile>(API_CONFIG.USER.PROFILE);
+    const response = await api.get<ApiEnvelope<MyProfile>>(
+      API_CONFIG.USER.PROFILE,
+    );
     console.log('🚀 ~ getProfileApi ~ response.data:', response.data);
-    return response.data;
+    return response.data.data;
   } catch (error) {
     console.log('🚀 ~ getProfileApi ~ error:', error);
     throw error;
@@ -38,10 +67,13 @@ export const getProfileApi = async (): Promise<UserProfile> => {
 
 /**
  * Matches the confirmed contract exactly:
- *   PATCH /api/v1/users/me/profile/   { "first_name": "John", "last_name": "Doe" }
+ *   PATCH /api/v1/users/me/   { "first_name": "John", "last_name": "Doe" }
  *
  * Deliberately excludes mobile number/email - not part of this confirmed
- * payload shape.
+ * payload shape. Previously pointed at `/users/me/profile/` (the
+ * EXTENDED-profile endpoint, which doesn't accept first_name/last_name at
+ * all and silently drops them) - fixed to hit the basic-info endpoint that
+ * actually applies this payload.
  */
 export type UpdateProfilePayload = {
   first_name: string;
@@ -50,19 +82,19 @@ export type UpdateProfilePayload = {
 
 export const updateProfileApi = async (
   payload: UpdateProfilePayload,
-): Promise<UserProfile> => {
+): Promise<MyProfile> => {
   console.log(
     '🚀 ~ updateProfileApi ~ requesting:',
-    API_CONFIG.USER.UPDATE_PROFILE,
+    API_CONFIG.USER.PROFILE,
     payload,
   );
   try {
-    const response = await api.patch<UserProfile>(
-      API_CONFIG.USER.UPDATE_PROFILE,
+    const response = await api.patch<ApiEnvelope<MyProfile>>(
+      API_CONFIG.USER.PROFILE,
       payload,
     );
     console.log('🚀 ~ updateProfileApi ~ response.data:', response.data);
-    return response.data;
+    return response.data.data;
   } catch (error) {
     console.log('🚀 ~ updateProfileApi ~ error:', error);
     throw error;

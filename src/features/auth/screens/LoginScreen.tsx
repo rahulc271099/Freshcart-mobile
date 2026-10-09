@@ -1,56 +1,162 @@
-import React, { useCallback, useMemo, useState } from 'react';
-import { Pressable, StyleSheet, Text, View, Image } from 'react-native';
+import React, {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
+import {
+  AccessibilityInfo,
+  Keyboard,
+  type LayoutChangeEvent,
+  Platform,
+  type ScrollView,
+  StyleSheet,
+  Text,
+  View,
+  useWindowDimensions,
+} from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
+import Animated, {
+  Easing,
+  FadeInDown,
+  ReduceMotion,
+  useAnimatedStyle,
+  useReducedMotion,
+  useSharedValue,
+  withTiming,
+} from 'react-native-reanimated';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { Button, Header, ScreenContainer, TextInput } from '@/components';
+import { Button, ScreenContainer, TextInput } from '@/components';
 import { icons } from '@/constants/icons';
-import { images } from '@/constants/images';
-import { useLogin } from '../hooks/useLogin';
-import {
-  dimensions,
-  radius,
-  shadows,
-  spacing,
-  typography,
-  useTheme,
-  type ThemeColors,
-} from '@/theme';
+import { useShake } from '@/hooks/useShake';
+import { fonts, radius, spacing, useTheme, type ThemeColors } from '@/theme';
 import type { AuthStackParamList } from '@/app/navigation/navigationTypes';
+import { AuthEntrance } from '../components/AuthEntrance';
+import { AuthHeroBackground } from '../components/AuthHeroBackground';
+import { BrandTile } from '../components/BrandTile';
+import { GlassPill } from '../components/GlassPill';
+import { LoginTrustTiles } from '../components/LoginTrustTiles';
+import { authPalette } from '../authPalette';
+import { AUTH_CARD_MIN_HEIGHT } from '../authLayout';
+import { useHeroPhotoHeight } from '../hooks/useHeroPhoto';
+import { useKeyboardLift } from '../hooks/useKeyboardLift';
+import { useLogin } from '../hooks/useLogin';
+import { formatMobileNumber } from '../utils/formatMobile';
 
 type LoginScreenNavigationProp = NativeStackNavigationProp<
   AuthStackParamList,
   'Login'
 >;
-
 const COUNTRY_CODE = '+91';
 const MOBILE_NUMBER_LENGTH = 10;
 const MOBILE_NUMBER_REGEX = /^[6-9]\d{9}$/;
+/** Card's top corners overlap the photo by this much (matches `radius.xlg`). */
+const CARD_OVERLAP = radius.xlg;
+const HERO_MIN_HEIGHT = 230;
+/** Card height before it has been measured (only used for the first frame). */
 
+/**
+ * Crossfading phone → check glyph in the input. Confirms a complete number
+ * the moment the 10th digit lands, before the user reaches for the button.
+ */
+function PhoneStatusIcon({ valid, color }: { valid: boolean; color: string }) {
+  const { colors } = useTheme();
+  const reducedMotion = useReducedMotion();
+  const progress = useSharedValue(valid ? 1 : 0);
 
+  useEffect(() => {
+    progress.value = withTiming(valid ? 1 : 0, {
+      duration: reducedMotion ? 0 : 200,
+      easing: Easing.bezier(0.23, 1, 0.32, 1),
+    });
+  }, [valid, progress, reducedMotion]);
+
+  const phoneStyle = useAnimatedStyle(() => ({
+    opacity: 1 - progress.value,
+    transform: [{ scale: 1 - 0.3 * progress.value }],
+  }));
+  const checkStyle = useAnimatedStyle(() => ({
+    opacity: progress.value,
+    transform: [{ scale: 0.7 + 0.3 * progress.value }],
+  }));
+
+  return (
+    <View
+      style={statusStyles.wrap}
+      accessible={false}
+      importantForAccessibility="no-hide-descendants"
+    >
+      <Animated.View style={[statusStyles.layer, phoneStyle]}>
+        <icons.phone size={20} color={color} />
+      </Animated.View>
+      <Animated.View style={[statusStyles.layer, checkStyle]}>
+        <icons.checkCircle size={22} color={colors.success} />
+      </Animated.View>
+    </View>
+  );
+}
+
+const statusStyles = StyleSheet.create({
+  wrap: { width: 24, height: 24, marginLeft: spacing.sm },
+  layer: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+});
 
 export function LoginScreen() {
   const navigation = useNavigation<LoginScreenNavigationProp>();
   const { colors } = useTheme();
+  const insets = useSafeAreaInsets();
+  const { width, height } = useWindowDimensions();
   const styles = useMemo(() => createStyles(colors), [colors]);
   const [mobileNumber, setMobileNumber] = useState('');
-  const [error, setError] = useState<string | undefined>(undefined);
-
+  const [error, setError] = useState<string | undefined>();
   const { mutate: login, isPending } = useLogin();
-
-  const handleChangeMobileNumber = useCallback(
-    (text: string) => {
-      setMobileNumber(
-        text.replace(/[^0-9]/g, '').slice(0, MOBILE_NUMBER_LENGTH),
-      );
-      if (error) setError(undefined);
+  const { style: shakeStyle, shake } = useShake();
+  const scrollRef = useRef<ScrollView>(null);
+  const { photoHeight, onCardLayout } = useHeroPhotoHeight(
+    height,
+    HERO_MIN_HEIGHT,
+    CARD_OVERLAP,
+    AUTH_CARD_MIN_HEIGHT,
+  );
+  // Card's y inside the scroll content - where to scroll to when the keyboard
+  // opens so the label, input and button sit above it.
+  const cardY = useRef(0);
+  const getCardTop = useCallback(() => cardY.current, []);
+  const { liftStyle, heroStyle } = useKeyboardLift(
+    getCardTop,
+    insets.top + spacing.sm,
+  );
+  const handleCardLayout = useCallback(
+    (event: LayoutChangeEvent) => {
+      cardY.current = event.nativeEvent.layout.y;
+      onCardLayout(event);
     },
-    [error],
+    [onCardLayout],
   );
 
-  const handleBackPress = useCallback(() => {
-    navigation.goBack();
-  }, [navigation]);
+  useEffect(() => {
+    if (error && Platform.OS === 'ios')
+      AccessibilityInfo.announceForAccessibility(error);
+  }, [error]);
+
+  const handleChangeMobileNumber = useCallback((text: string) => {
+    let digits = text.replace(/[^0-9]/g, '');
+    if (digits.length === 12 && digits.startsWith('91'))
+      digits = digits.slice(2);
+    setMobileNumber(digits.slice(0, MOBILE_NUMBER_LENGTH));
+    setError(undefined);
+  }, []);
 
   const handleContinue = useCallback(() => {
     if (isPending) return;
@@ -61,14 +167,15 @@ export function LoginScreen() {
           ? 'Enter a valid 10-digit mobile number'
           : "That doesn't look like a valid mobile number",
       );
+      shake();
       return;
     }
 
+    Keyboard.dismiss();
     login(
       { mobile: mobileNumber },
       {
-        onSuccess: (data) => {
-          console.log("🚀 ~ LoginScreen ~ data:", data)
+        onSuccess: data => {
           const responseData = data as { data?: { otp?: string } };
           const otp = responseData.data?.otp;
           navigation.navigate('OTPVerification', {
@@ -76,264 +183,439 @@ export function LoginScreen() {
             otp,
           });
         },
-        onError: (err) => {
-          console.log("🚀 ~ LoginScreen ~ err:", err)
+        onError: err => {
           setError(err.message ?? 'Something went wrong. Please try again.');
+          shake();
         },
       },
     );
-  }, [isPending, login, mobileNumber, navigation]);
+  }, [isPending, login, mobileNumber, navigation, shake]);
 
-  const handleSocialSignIn = useCallback(() => {
-    // Google/Apple sign-in is not implemented yet - see task scope. Also,
-    // no icon set is part of the approved stack (see constants/icons.ts),
-    // so these buttons are text-only for now rather than using an
-    // inaccurate stand-in glyph for the Google/Apple marks.
-  }, []);
-
-  const handleSignUpPress = useCallback(() => {
-    // No "SignUp" route exists in AuthStackParamList yet - this screen only
-    // covers the Login → OTPVerification step per this task's scope.
-  }, []);
+  const isComplete = mobileNumber.length === MOBILE_NUMBER_LENGTH;
+  // The tick means "this is a real mobile number", not merely "10 digits".
+  const isValidNumber = MOBILE_NUMBER_REGEX.test(mobileNumber);
+  const gutter = width < 360 ? spacing.md : spacing.lg;
 
   return (
-    <ScreenContainer
-      scrollable
-      padded={false}
-      backgroundColor={colors.backgroundSec}
-    >
-      <Header
-        onBackPress={handleBackPress}
-        style={[styles.header, { backgroundColor: 'transparent', zIndex: 1 }]}
-      />
-
-      <View style={styles.hero}>
-        <Image 
-          source={images.loginBg} 
-          style={styles.heroImage} 
-          resizeMode="cover" 
-        />
-        <View style={styles.logoRow}>
-          <Text style={styles.logoF}>F</Text>
-          <Text style={styles.logoAmp}>&</Text>
-          <Text style={styles.logoV}>V</Text>
-        </View>
-        <Text style={styles.tagline}>Fresh. Natural. Delivered.</Text>
-
-        <Text style={styles.title}>Welcome Back!</Text>
-        <Text style={styles.subtitle}>
-          Login to continue shopping fresh &amp; healthy
-        </Text>
-      </View>
-
-      <View style={styles.card}>
-        <TextInput
-          label="Mobile Number"
-          value={mobileNumber}
-          onChangeText={handleChangeMobileNumber}
-          placeholder="Enter mobile number"
-          keyboardType="number-pad"
-          maxLength={MOBILE_NUMBER_LENGTH}
-          error={error}
-          leftAccessory={
-            <View style={styles.countryCode}>
-              <Text style={styles.countryCodeText}>{COUNTRY_CODE}</Text>
-              <View style={styles.countryCodeChevron}>
-                <icons.chevronDown
-                  color={colors.textSecondary}
-                  size={dimensions.iconSize.sm}
+    <View style={styles.root} testID="login-screen">
+      <AuthHeroBackground variant="login" height={photoHeight} />
+      <ScreenContainer
+        scrollable
+        padded={false}
+        edges={[]}
+        backgroundColor="transparent"
+        keyboardAvoiding={false}
+        scrollRef={scrollRef}
+        scrollViewProps={{
+          bounces: false,
+          overScrollMode: 'never',
+          decelerationRate: 'fast',
+        }}
+      >
+        <Animated.View style={[styles.liftWrap, liftStyle]}>
+          {/* ── Hero: badges on top, brand lockup pinned to the card edge ── */}
+          <Animated.View
+            style={[
+              styles.hero,
+              {
+                paddingTop: insets.top + spacing.sm,
+                paddingHorizontal: gutter,
+                paddingBottom: CARD_OVERLAP + spacing.md,
+              },
+              heroStyle,
+            ]}
+          >
+            <AuthEntrance style={styles.badgeRow}>
+              <GlassPill tone="light">
+                <View style={styles.liveDot} />
+                <Text style={styles.badgeDark} maxFontSizeMultiplier={1.2}>
+                  FARM-TO-TABLE RESERVE
+                </Text>
+              </GlassPill>
+              <GlassPill tone="dark">
+                <icons.star
+                  size={12}
+                  color={authPalette.brightBlue}
+                  fill={authPalette.brightBlue}
                 />
+                <Text style={styles.badgeLight} maxFontSizeMultiplier={1.2}>
+                  TIER 1 PURITY
+                </Text>
+              </GlassPill>
+            </AuthEntrance>
+
+            <AuthEntrance delay={80} style={styles.lockup}>
+              <BrandTile size={42} />
+              <View style={styles.lockupText}>
+                <View style={styles.wordmarkRow}>
+                  <Text
+                    accessibilityRole="header"
+                    style={styles.wordmark}
+                    maxFontSizeMultiplier={1.2}
+                  >
+                    F&V
+                  </Text>
+                  <GlassPill tone="dark" style={styles.estPill}>
+                    <Text style={styles.estText} maxFontSizeMultiplier={1.2}>
+                      EST. 2024
+                    </Text>
+                  </GlassPill>
+                </View>
+                <Text
+                  style={styles.tagline}
+                  numberOfLines={1}
+                  adjustsFontSizeToFit
+                  minimumFontScale={0.8}
+                  maxFontSizeMultiplier={1.2}
+                >
+                  CURATED HARVEST • DIRECT
+                </Text>
               </View>
-              <View style={styles.countryCodeDivider} />
+              <View style={styles.certPill}>
+                <Text style={styles.certText} maxFontSizeMultiplier={1.2}>
+                  ORGANIC CERT
+                </Text>
+              </View>
+            </AuthEntrance>
+          </Animated.View>
+
+          {/* ── Card ── */}
+          <Animated.View
+            entering={FadeInDown.withInitialValues({
+              opacity: 0,
+              transform: [{ translateY: 36 }],
+            })
+              .duration(420)
+              .delay(60)
+              .easing(Easing.bezier(0.23, 1, 0.32, 1))
+              .reduceMotion(ReduceMotion.System)}
+            onLayout={handleCardLayout}
+            style={[
+              styles.card,
+              {
+                paddingHorizontal: gutter,
+                paddingBottom: Math.max(insets.bottom, spacing.md) + spacing.sm,
+                minHeight: AUTH_CARD_MIN_HEIGHT,
+              },
+            ]}
+          >
+            {/* Surface continues below the card so nothing shows through while it
+              is lifted (Android only reports the keyboard closing after it is gone). */}
+            <View pointerEvents="none" style={styles.cardFiller} />
+            <View style={styles.labelRow}>
+              <Text style={styles.fieldLabel} maxFontSizeMultiplier={1.3}>
+                MOBILE NUMBER
+              </Text>
+              <View style={styles.instantTag}>
+                <View style={styles.instantDot} />
+                <Text style={styles.instantText} maxFontSizeMultiplier={1.3}>
+                  Instant OTP
+                </Text>
+              </View>
             </View>
-          }
-          testID="login-mobile-number-input"
-        />
 
-        <View style={styles.helperRow}>
-          <View style={styles.helperIcon}>
-            <icons.shield
-              color={colors.textSecondary}
-              size={dimensions.iconSize.sm}
+            <Animated.View style={shakeStyle}>
+              <TextInput
+                animatedFocus
+                accessibilityLabel="Mobile number, India, country code plus 91"
+                accessibilityHint="Enter your 10-digit mobile number"
+                value={formatMobileNumber(mobileNumber)}
+                onChangeText={handleChangeMobileNumber}
+                placeholder="98765 43210"
+                placeholderTextColor={`${colors.textSecondary}A6`}
+                keyboardType="phone-pad"
+                autoComplete={
+                  Platform.OS === 'android' ? 'tel-national' : 'tel'
+                }
+                textContentType="telephoneNumber"
+                disabled={isPending}
+                error={error}
+                inputContainerStyle={styles.phoneContainer}
+                inputStyle={styles.phoneInput}
+                leftAccessory={
+                  <View style={styles.countryChip} accessible={false}>
+                    <Text style={styles.flag}>🇮🇳</Text>
+                    <Text style={styles.countryCodeText}>{COUNTRY_CODE}</Text>
+                  </View>
+                }
+                rightAccessory={
+                  <PhoneStatusIcon
+                    valid={isValidNumber}
+                    color={colors.textSecondary}
+                  />
+                }
+                testID="login-mobile-number-input"
+              />
+            </Animated.View>
+
+            <View style={styles.infoStrip}>
+              <View style={styles.infoIcon}>
+                <icons.shield size={16} color={colors.primary} />
+              </View>
+              <Text style={styles.infoText}>
+                We’ll send a <Text style={styles.infoStrong}>4-digit OTP</Text>{' '}
+                by SMS for passwordless sign-in.
+              </Text>
+            </View>
+
+            <Button
+              title="Continue with OTP"
+              loadingTitle="Sending code…"
+              onPress={handleContinue}
+              loading={isPending}
+              disabled={!isComplete}
+              fullWidth
+              rightIcon={
+                <icons.arrowRight size={18} color={colors.textInverse} />
+              }
+              style={styles.continueButton}
+              testID="login-continue-button"
             />
-          </View>
-          <Text style={styles.helperText}>
-            We will send you a 6-digit OTP to verify your number
-          </Text>
-        </View>
 
-        <Button
-          title="Continue"
-          onPress={handleContinue}
-          loading={isPending}
-          disabled={mobileNumber.length !== MOBILE_NUMBER_LENGTH || isPending}
-          fullWidth
-          style={styles.continueButton}
-          testID="login-continue-button"
-        />
+            <AuthEntrance delay={140} style={styles.tiles}>
+              <LoginTrustTiles />
+            </AuthEntrance>
 
-        <View style={styles.dividerRow}>
-          <View style={styles.dividerLine} />
-          <Text style={styles.dividerText}>Or continue with</Text>
-          <View style={styles.dividerLine} />
-        </View>
-
-        <View style={styles.socialRow}>
-          <Button
-            title="Continue with Google"
-            variant="outline"
-            onPress={handleSocialSignIn}
-            style={styles.socialButton}
-          />
-          <Button
-            title="Continue with Apple"
-            variant="outline"
-            onPress={handleSocialSignIn}
-            style={styles.socialButton}
-          />
-        </View>
-
-        <View style={styles.signUpRow}>
-          <Text style={styles.signUpText}>Don&apos;t have an account? </Text>
-          <Pressable onPress={handleSignUpPress} hitSlop={8}>
-            <Text style={styles.signUpLink}>Sign Up</Text>
-          </Pressable>
-        </View>
-      </View>
-    </ScreenContainer>
+            <View style={styles.footer}>
+              <Text style={styles.legal}>
+                By continuing, you agree to F&V’s{' '}
+                <Text style={styles.legalStrong}>Terms of Service</Text> &{' '}
+                <Text style={styles.legalStrong}>Privacy Policy</Text>.
+              </Text>
+            </View>
+          </Animated.View>
+        </Animated.View>
+      </ScreenContainer>
+    </View>
   );
 }
 
 function createStyles(colors: ThemeColors) {
   return StyleSheet.create({
-    header: {
-      paddingHorizontal: spacing.lg,
-    },
-    hero: {
-      backgroundColor: colors.backgroundSec,
-      paddingHorizontal: spacing.lg,
-      paddingTop: spacing.sm,
-      paddingBottom: spacing.xl,
-    },
-    heroImage: {
+    root: { flex: 1, backgroundColor: authPalette.night },
+
+    liftWrap: { flexGrow: 1 },
+    cardFiller: {
       position: 'absolute',
-      top: -60, // Adjust this as needed based on the header height
+      top: '100%',
+      left: 0,
       right: 0,
-      width: '65%',
-      height: '150%', // To ensure it covers enough vertical space
-      opacity: 1,
+      height: 900,
+      backgroundColor: colors.background,
     },
-    logoRow: {
+
+    // Hero
+    hero: {
+      flexGrow: 1,
+      minHeight: HERO_MIN_HEIGHT,
+      justifyContent: 'space-between',
+    },
+    badgeRow: {
       flexDirection: 'row',
-      alignItems: 'flex-end',
+      alignItems: 'center',
+      justifyContent: 'space-between',
     },
-    logoF: {
-      ...typography.heading1,
-      color: colors.primary,
+    liveDot: {
+      width: 8,
+      height: 8,
+      borderRadius: 4,
+      backgroundColor: authPalette.brightBlue,
     },
-    logoAmp: {
-      ...typography.heading1,
-      color: colors.secondary,
+    badgeDark: {
+      fontFamily: fonts.bold,
+      fontSize: 10,
+      lineHeight: 13,
+      letterSpacing: 0.8,
+      color: authPalette.ink,
     },
-    logoV: {
-      ...typography.heading1,
-      color: colors.primary,
+    badgeLight: {
+      fontFamily: fonts.bold,
+      fontSize: 10,
+      lineHeight: 13,
+      letterSpacing: 0.8,
+      color: authPalette.white,
+    },
+    lockup: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm + 2 },
+    lockupText: { flex: 1 },
+    wordmarkRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: spacing.sm,
+    },
+    wordmark: {
+      fontFamily: fonts.bold,
+      fontSize: 24,
+      lineHeight: 30,
+      letterSpacing: -0.4,
+      color: authPalette.white,
+    },
+    estPill: { paddingVertical: 3, paddingHorizontal: 8 },
+    estText: {
+      fontFamily: fonts.semiBold,
+      fontSize: 10,
+      lineHeight: 13,
+      letterSpacing: 1,
+      color: authPalette.onPhotoMuted,
     },
     tagline: {
-      ...typography.body,
-      color: colors.primary,
-      marginTop: spacing.xs,
-      marginBottom: spacing.lg,
+      fontFamily: fonts.medium,
+      fontSize: 10,
+      lineHeight: 14,
+      letterSpacing: 1.2,
+      color: authPalette.onPhotoMuted,
+      marginTop: 2,
     },
-    title: {
-      ...typography.heading2,
-      color: colors.textPrimary,
-      marginBottom: spacing.xs,
+    certPill: {
+      alignSelf: 'flex-end',
+      backgroundColor: colors.primary,
+      borderRadius: 999,
+      paddingHorizontal: 10,
+      paddingVertical: 6,
     },
-    subtitle: {
-      ...typography.body,
-      color: colors.textSecondary,
+    certText: {
+      fontFamily: fonts.bold,
+      fontSize: 9,
+      lineHeight: 13,
+      letterSpacing: 0.8,
+      color: colors.textInverse,
     },
+
+    // Card
     card: {
-      flex: 1,
+      marginTop: -CARD_OVERLAP,
       backgroundColor: colors.background,
       borderTopLeftRadius: radius.xlg,
       borderTopRightRadius: radius.xlg,
-      paddingHorizontal: spacing.lg,
-      paddingTop: spacing.lg,
-      paddingBottom: spacing.xl,
-      ...shadows.md,
+      paddingTop: spacing.lg - 4,
+      width: '100%',
+      maxWidth: 560,
+      alignSelf: 'center',
+      ...Platform.select({
+        ios: {
+          shadowColor: '#050B1C',
+          shadowOpacity: 0.18,
+          shadowRadius: 18,
+          shadowOffset: { width: 0, height: -6 },
+        },
+        default: {},
+      }),
     },
-    countryCode: {
+    labelRow: {
       flexDirection: 'row',
       alignItems: 'center',
-      marginRight: spacing.sm,
+      justifyContent: 'space-between',
+      marginBottom: spacing.sm + 2,
     },
+    fieldLabel: {
+      fontFamily: fonts.bold,
+      fontSize: 10,
+      lineHeight: 14,
+      letterSpacing: 1,
+      color: colors.textSecondary,
+    },
+    instantTag: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+    instantDot: {
+      width: 6,
+      height: 6,
+      borderRadius: 3,
+      backgroundColor: colors.primary,
+    },
+    instantText: {
+      fontFamily: fonts.semiBold,
+      fontSize: 11,
+      lineHeight: 16,
+      color: colors.primary,
+    },
+    phoneContainer: {
+      minHeight: 56,
+      borderRadius: radius.lg + 2,
+      borderColor: colors.border,
+      backgroundColor: colors.backgroundSec,
+      paddingHorizontal: spacing.sm + 2,
+    },
+    phoneInput: {
+      fontFamily: fonts.medium,
+      fontSize: 16,
+      lineHeight: 22,
+      letterSpacing: 0.5,
+      minWidth: 0,
+      marginLeft: spacing.sm + 2,
+    },
+    countryChip: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 8,
+      backgroundColor: colors.surface,
+      borderRadius: radius.lg - 4,
+      paddingHorizontal: 12,
+      height: 38,
+      borderWidth: StyleSheet.hairlineWidth,
+      borderColor: colors.border,
+    },
+    flag: { fontSize: 16, lineHeight: 22 },
     countryCodeText: {
-      ...typography.bodyStrong,
+      fontFamily: fonts.semiBold,
+      fontSize: 14,
+      lineHeight: 19,
       color: colors.textPrimary,
     },
-    countryCodeChevron: {
-      marginLeft: spacing.xs,
-    },
-    countryCodeDivider: {
-      width: 1,
-      height: 24,
-      backgroundColor: colors.border,
-      marginLeft: spacing.sm,
-    },
-    helperRow: {
+    infoStrip: {
       flexDirection: 'row',
       alignItems: 'center',
-      marginTop: spacing.sm,
+      gap: spacing.sm + 4,
+      marginTop: spacing.md,
+      padding: spacing.sm + 2,
+      borderRadius: radius.lg - 2,
+      borderWidth: 1,
+      borderColor: colors.divider,
+      backgroundColor: colors.backgroundSec,
     },
-    helperIcon: {
-      marginRight: spacing.xs,
-    },
-    helperText: {
-      ...typography.caption,
-      color: colors.textSecondary,
-      flexShrink: 1,
-    },
-    continueButton: {
-      marginTop: spacing.lg,
-    },
-    dividerRow: {
-      flexDirection: 'row',
+    infoIcon: {
+      width: 28,
+      height: 28,
+      borderRadius: 9,
       alignItems: 'center',
-      marginTop: spacing.lg,
-      marginBottom: spacing.lg,
-    },
-    dividerLine: {
-      flex: 1,
-      height: 1,
-      backgroundColor: colors.divider,
-    },
-    dividerText: {
-      ...typography.caption,
-      color: colors.textSecondary,
-      marginHorizontal: spacing.sm,
-    },
-    socialRow: {
-      flexDirection: 'row',
-      gap: spacing.sm,
-      marginBottom: spacing.lg,
-    },
-    socialButton: {
-      flex: 1,
-    },
-    signUpRow: {
-      flexDirection: 'row',
       justifyContent: 'center',
-      alignItems: 'center',
+      backgroundColor: `${colors.primary}1A`,
     },
-    signUpText: {
-      ...typography.body,
+    infoText: {
+      flex: 1,
+      fontFamily: fonts.regular,
+      fontSize: 12,
+      lineHeight: 17,
       color: colors.textSecondary,
     },
-    signUpLink: {
-      ...typography.bodyStrong,
-      color: colors.primary,
+    infoStrong: { fontFamily: fonts.bold, color: colors.textPrimary },
+    continueButton: {
+      marginTop: spacing.lg - 4,
+      ...Platform.select({
+        ios: {
+          shadowColor: colors.primary,
+          shadowOpacity: 0.35,
+          shadowRadius: 16,
+          shadowOffset: { width: 0, height: 8 },
+        },
+        default: {},
+      }),
+    },
+    tiles: { marginTop: spacing.md },
+    footer: {
+      marginTop: spacing.md,
+      paddingTop: spacing.md - 2,
+      borderTopWidth: StyleSheet.hairlineWidth,
+      borderTopColor: colors.divider,
+    },
+    legal: {
+      fontFamily: fonts.regular,
+      fontSize: 12,
+      lineHeight: 18,
+      color: colors.textSecondary,
+      textAlign: 'center',
+    },
+    legalStrong: {
+      fontFamily: fonts.semiBold,
+      color: colors.textPrimary,
+      textDecorationLine: 'underline',
     },
   });
 }
